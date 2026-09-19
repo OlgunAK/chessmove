@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Sayfadaki satranç tahtasını okur, en iyi hamleyi hesaplar ve istenirse otomatik oynar.",
   "minimum_chrome_version": "114",
-  "permissions": ["sidePanel", "scripting", "storage", "tabs"],
+  "permissions": ["sidePanel", "scripting", "storage", "tabs", "activeTab"],
   "host_permissions": ["http://*/*", "https://*/*", "file:///*"],
   "background": {
     "service_worker": "src/background/service_worker.js"

@@ -79,3 +79,9 @@ textarea{
 input[type=range]{flex:1;accent-color:var(--accent);min-width:0}
 .hint{font-size:11px;color:var(--muted);margin:6px 0 2px;line-height:1.4}
 .foot{font-size:10px;color:#6b7280;text-align:center;padding-top:2px}
+
+.loopState{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.loopState.active{color:var(--accent)}
+.loopState.thinking{color:var(--accent2)}
+.sq.low{box-shadow:inset 0 0 0 2px var(--warn)}
+#visionBox .hint{margin:4px 0}

@@ -106,6 +106,8 @@
       squareSize: board.squareSize,
       pieces: board.pieces,
       lastMove: board.lastMove,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      dpr: window.devicePixelRatio || 1,
       fen: built ? built.fen : null,
       turn: built ? built.turn : null,
       turnSource: built ? built.turnSource : null,
@@ -206,6 +208,10 @@
     },
 
     clearArrow: () => { NS.overlay.clearArrow(); return { ok: true }; },
+
+    // ekran görüntüsü alınmadan önce/sonra kendi çizimlerimizi gizle-göster
+    hideOverlays: () => { NS.overlay.setHidden(true); return { ok: true }; },
+    showOverlays: () => { NS.overlay.setHidden(false); return { ok: true }; },
 
     badge: (msg) => { NS.overlay.badge(msg.text, msg.ms); return { ok: true }; },
 

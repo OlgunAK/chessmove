@@ -177,5 +177,15 @@
   }
   function hideRegion() { if (regionBox) { regionBox.remove(); regionBox = null; } }
 
-  NS.overlay = { pickRegion, drawArrow, clearArrow, badge, showRegion, hideRegion };
+  /** Ekran görüntüsü alınırken kendi çizimlerimiz kareye girmesin diye gizlenir. */
+  let hidden = false;
+  function setHidden(value) {
+    hidden = !!value;
+    for (const node of [arrowEl, badgeEl, regionBox]) {
+      if (node) node.style.visibility = hidden ? 'hidden' : 'visible';
+    }
+    return hidden;
+  }
+
+  NS.overlay = { pickRegion, drawArrow, clearArrow, badge, showRegion, hideRegion, setHidden };
 })();

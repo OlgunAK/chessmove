@@ -58,6 +58,14 @@
     </select>
   </section>
 
+  <section class="autoRow">
+    <label class="switch">
+      <input type="checkbox" id="liveAnalysis" checked>
+      <span>Sürekli analiz</span>
+    </label>
+    <span id="loopState" class="loopState">beklemede</span>
+  </section>
+
   <details class="panelBox">
     <summary>Konum</summary>
     <div class="row">
@@ -77,6 +85,26 @@
     </div>
   </details>
 
+  <details class="panelBox" id="visionBox">
+    <summary>Ekrandan tanıma</summary>
+    <p class="hint">Tahtayı DOM'dan okuyamadığımız sitelerde (tuval ile çizilen tahtalar,
+      görsel bulmacalar) konumu ekran görüntüsünden okur. Önce bir kez kalibre edin:
+      tahtayı bilinen bir konuma getirip aşağıdaki düğmeye basın.</p>
+    <div class="row">
+      <button id="btnCalibrate" class="ghost">Kalibre et</button>
+      <select id="calibSource" title="Kalibrasyonda hangi konum doğru kabul edilsin">
+        <option value="start">başlangıç konumundan</option>
+        <option value="fen">FEN kutusundaki konumdan</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="btnRecognize" class="ghost">Ekrandan oku</button>
+      <button id="btnResetTemplates" class="ghost">Şablonları sil</button>
+    </div>
+    <label class="switch"><input type="checkbox" id="useVision"><span>Konumu hep ekrandan oku</span></label>
+    <p id="visionState" class="hint">kalibre edilmedi</p>
+  </details>
+
   <details class="panelBox">
     <summary>Ayarlar</summary>
     <div class="row">
@@ -93,6 +121,11 @@
       <label for="playDelay">Oynama gecikmesi</label>
       <input type="range" id="playDelay" min="0" max="5000" step="100" value="400">
       <output id="playDelayOut">0.4 sn</output>
+    </div>
+    <div class="row">
+      <label for="scanInterval">Tarama aralığı</label>
+      <input type="range" id="scanInterval" min="300" max="3000" step="100" value="700">
+      <output id="scanIntervalOut">0.7 sn</output>
     </div>
     <div class="row">
       <label for="method">Hamle biçimi</label>
@@ -114,6 +147,8 @@
     <span id="footNote">Sadece kendi analizinizde ve izin verilen yerlerde kullanın.</span>
   </footer>
 
+  <canvas id="captureCanvas" width="512" height="512" hidden></canvas>
+  <script src="../vision/recognizer.js"></script>
   <script src="panel.js"></script>
 </body>
 </html>
