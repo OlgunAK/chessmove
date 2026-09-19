@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChessMove</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo">♞</span>
+      <div>
+        <h1>ChessMove</h1>
+        <p id="engineLine" class="sub">motor yükleniyor…</p>
+      </div>
+    </div>
+    <button id="btnScan" class="icon" title="Tahtayı yeniden tara">⟳</button>
+  </header>
+
+  <section class="status" id="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Tahta aranıyor…</span>
+  </section>
+
+  <section class="boardWrap">
+    <div id="board" class="board" aria-label="Okunan konum"></div>
+    <div class="evalBar" title="Değerlendirme"><div id="evalFill"></div></div>
+  </section>
+
+  <section class="result">
+    <div class="bestRow">
+      <span class="label">En iyi hamle</span>
+      <span id="bestMove" class="best">—</span>
+    </div>
+    <div class="metaRow">
+      <span id="evalText">0.00</span>
+      <span id="depthText">d0</span>
+      <span id="nodesText">0 n</span>
+    </div>
+    <div id="pvText" class="pv"></div>
+  </section>
+
+  <section class="actions">
+    <button id="btnAnalyze" class="primary">Analiz et</button>
+    <button id="btnPlay">Hamleyi oyna</button>
+  </section>
+
+  <section class="autoRow">
+    <label class="switch">
+      <input type="checkbox" id="autoPlay">
+      <span>Otomatik oyna</span>
+    </label>
+    <select id="myColor" title="Hangi renkle oynuyorsunuz">
+      <option value="auto">Renk: otomatik</option>
+      <option value="w">Beyaz</option>
+      <option value="b">Siyah</option>
+    </select>
+  </section>
+
+  <details class="panelBox">
+    <summary>Konum</summary>
+    <div class="row">
+      <label for="turnSel">Sıra</label>
+      <select id="turnSel">
+        <option value="auto">Otomatik algıla</option>
+        <option value="w">Beyaz</option>
+        <option value="b">Siyah</option>
+      </select>
+      <button id="btnFlip" class="ghost" title="Tahtayı çevir">⇅</button>
+    </div>
+    <textarea id="fenBox" rows="2" spellcheck="false" placeholder="FEN"></textarea>
+    <div class="row">
+      <button id="btnUseFen" class="ghost">FEN'i kullan</button>
+      <button id="btnStartPos" class="ghost">Başlangıç</button>
+      <button id="btnCopyFen" class="ghost">Kopyala</button>
+    </div>
+  </details>
+
+  <details class="panelBox">
+    <summary>Ayarlar</summary>
+    <div class="row">
+      <label for="movetime">Düşünme süresi</label>
+      <input type="range" id="movetime" min="100" max="8000" step="100" value="1200">
+      <output id="movetimeOut">1.2 sn</output>
+    </div>
+    <div class="row">
+      <label for="maxDepth">Derinlik sınırı</label>
+      <input type="range" id="maxDepth" min="1" max="30" step="1" value="30">
+      <output id="maxDepthOut">sınırsız</output>
+    </div>
+    <div class="row">
+      <label for="playDelay">Oynama gecikmesi</label>
+      <input type="range" id="playDelay" min="0" max="5000" step="100" value="400">
+      <output id="playDelayOut">0.4 sn</output>
+    </div>
+    <div class="row">
+      <label for="method">Hamle biçimi</label>
+      <select id="method">
+        <option value="click">Tıkla-tıkla</option>
+        <option value="drag">Sürükle-bırak</option>
+      </select>
+    </div>
+    <label class="switch"><input type="checkbox" id="showArrow" checked><span>Tahtada ok göster</span></label>
+    <label class="switch"><input type="checkbox" id="useStockfish"><span>Stockfish kullan (vendor/stockfish.js)</span></label>
+    <div class="row">
+      <button id="btnPickRegion" class="ghost">Bölge seç</button>
+      <button id="btnClearRegion" class="ghost">Bölgeyi kaldır</button>
+    </div>
+    <p class="hint">Desteklenmeyen sitelerde tahtanın köşelerini sürükleyerek bölge seçin, konumu FEN kutusuna girin. Hamleler seçtiğiniz bölgeye oynanır.</p>
+  </details>
+
+  <footer class="foot">
+    <span id="footNote">Sadece kendi analizinizde ve izin verilen yerlerde kullanın.</span>
+  </footer>
+
+  <script src="panel.js"></script>
+</body>
+</html>

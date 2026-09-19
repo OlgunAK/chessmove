@@ -1,0 +1,12 @@
+{
+  "name": "chessmove",
+  "version": "0.1.0",
+  "description": "Sayfadaki satranç tahtasını okuyup en iyi hamleyi hesaplayan ve oynayan Chrome eklentisi",
+  "private": true,
+  "scripts": {
+    "test": "node test/perft.test.js && node test/board.test.js",
+    "test:engine": "node test/perft.test.js",
+    "test:board": "node test/board.test.js"
+  },
+  "license": "MIT"
+}

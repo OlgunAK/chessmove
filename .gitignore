@@ -1,0 +1,4 @@
+node_modules/
+vendor/stockfish*
+*.zip
+.DS_Store
