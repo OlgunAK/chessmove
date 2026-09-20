@@ -8,7 +8,7 @@
  */
 'use strict';
 
-importScripts('chess.js', 'evaluate.js', 'search.js');
+importScripts('chess.js', 'evaluate.js', 'search.js', 'variety.js');
 
 const C = self.ChessCore;
 const S = self.ChessSearch;
@@ -34,6 +34,8 @@ function analyzeBuiltin(req) {
   const result = searcher.go(pos, {
     movetime: req.movetime || 1500,
     depth: req.depth || 64,
+    multiPv: req.multiPv || 1,
+    multiPvMargin: req.multiPvMargin || 0,
     stopFlag: () => stopRequested,
     onInfo: (info) => post(Object.assign({ id: req.id, type: 'info', engine: 'builtin' }, info))
   });
@@ -70,9 +72,22 @@ function setupUci(url) {
   });
 }
 
+/** UCI hamlesini arayüzün beklediği aday nesnesine çevirir. */
+function describeUciMove(pos, uciMove, score, mate) {
+  const move = pos.moveFromUci(uciMove);
+  if (!move) return null;
+  return {
+    uci: uciMove, san: pos.moveToSan(move),
+    from: C.squareName(C.mFrom(move)), to: C.squareName(C.mTo(move)),
+    promo: uciMove[4] || null, score, mate
+  };
+}
+
 function analyzeUci(req) {
   const pos = new C.Position(req.fen);
   const w = uci.worker;
+  const multiPv = Math.max(1, req.multiPv || 1);
+  const lines = new Map();          // multipv sırası → son bilgi
   let lastInfo = null;
 
   w.onmessage = (e) => {
@@ -84,22 +99,39 @@ function analyzeUci(req) {
       const nps = parseInt(t[t.indexOf('nps') + 1], 10) || 0;
       const pv = t.slice(t.indexOf('pv') + 1);
       const sc = scoreToObject(t);
-      lastInfo = { depth, nodes, nps, pv, score: sc.score, mate: sc.mate };
-      post(Object.assign({ id: req.id, type: 'info', engine: 'stockfish', fen: req.fen }, lastInfo));
+      const idx = t.indexOf('multipv') >= 0 ? parseInt(t[t.indexOf('multipv') + 1], 10) || 1 : 1;
+      lines.set(idx, { depth, score: sc.score, mate: sc.mate, pv });
+      if (idx === 1) {
+        lastInfo = { depth, nodes, nps, pv, score: sc.score, mate: sc.mate };
+        post(Object.assign({ id: req.id, type: 'info', engine: 'stockfish', fen: req.fen }, lastInfo));
+      }
     } else if (line.startsWith('bestmove')) {
       const uciMove = line.split(/\s+/)[1];
       const move = uciMove && uciMove !== '(none)' ? pos.moveFromUci(uciMove) : 0;
+
+      const candidates = [];
+      for (let i = 1; i <= multiPv; i++) {
+        const info = lines.get(i);
+        if (!info || !info.pv.length) continue;
+        const desc = describeUciMove(pos, info.pv[0], info.score, info.mate);
+        if (desc && !candidates.some((c) => c.uci === desc.uci)) candidates.push(desc);
+      }
+      if (!candidates.length && move) {
+        candidates.push(describeUciMove(pos, uciMove, (lastInfo && lastInfo.score) || 0, lastInfo && lastInfo.mate));
+      }
+
       post(Object.assign({
         id: req.id, type: 'bestmove', engine: 'stockfish', fen: req.fen,
         bestMove: move,
         best: move ? { from: C.squareName(C.mFrom(move)), to: C.squareName(C.mTo(move)), promo: uciMove[4] || null, uci: uciMove } : null,
         san: move ? pos.moveToSan(move) : null,
-        pvSan: [],
+        pvSan: [], candidates,
         gameOver: move ? null : (pos.inCheck() ? 'checkmate' : 'stalemate')
       }, lastInfo || { depth: 0, nodes: 0, nps: 0, pv: [], score: 0, mate: null }));
     }
   };
 
+  w.postMessage('setoption name MultiPV value ' + multiPv);
   w.postMessage('ucinewgame');
   w.postMessage('position fen ' + req.fen);
   if (req.depth && req.depth < 64) w.postMessage('go depth ' + req.depth);

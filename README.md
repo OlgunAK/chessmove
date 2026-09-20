@@ -59,6 +59,37 @@ konumu oku ──▶ sıra kimde?
   - *Ayarlar → Bölge seç*: tahtanın köşelerini sürükleyip bölgeyi tanımlarsınız,
     konumu FEN kutusuna elle yazarsınız. Hamleler seçtiğiniz bölgeye oynanır.
 
+## Hamle çeşitliliği
+
+Varsayılanda motor her zaman en iyi bulduğu hamleyi oynar; aynı konumda hep aynı
+hamle gelir. *Ayarlar → Hamle çeşitliliği* açıldığında kök aramada en iyi N hamlenin
+skoru birlikte hesaplanır ve aralarından biri rastgele seçilir — **ama** sıralamada
+belirgin bir düşüş varsa seçim o düşüşten öncekilerle sınırlanır:
+
+```
+adaylar:  e4 +0.20  Nf3 +0.16  Nc3 +0.16  d4 +0.08  c4 +0.03      → hepsi havuzda
+adaylar:  Qg6 M2    Rf1 +0.40  h3 +0.35   ...                     → uçurum: yalnız Qg6
+```
+
+Üç ayar:
+
+| Ayar | Ne yapar |
+|---|---|
+| **Aday sayısı** | Kaç hamle değerlendirilsin (en çok 10) |
+| **Uçurum eşiği** | İki aday arasındaki bu kadar santipiyonluk düşüş "uçurum" sayılır ve liste orada kesilir |
+| **En fazla kayıp** | En iyiden bu kadar geride olan hiçbir hamle seçilmez (toplam sapmayı sınırlar) |
+
+Korumalar: mat bulunduğunda mat varyantı dışına çıkılmaz, kayıp konumda en uzun
+direniş korunur, uçurum kuralı konumu bozacak hamleleri havuz dışında bırakır.
+Varsayılan eşiklerle başlangıç konumunda `a3`, `h3` gibi zayıf ama kaybettirmeyen
+hamleler de havuza girer; daha sıkı oynaması için *en fazla kayıp* değerini düşürün
+(örneğin 0.40'ta havuz `e4, Nf3, Nc3, d4, c4` olur).
+
+Maliyeti: çeşitlilik açıkken kökteki her hamle tam pencerede aranır (alfa
+yükseltilmez), böylece skorlar birbiriyle karşılaştırılabilir olur. Bu, aynı
+konumda ~5 kat düğüm demektir; süre sınırı sabit olduğundan erişilen derinlik
+birkaç kademe düşer. Stockfish kullanılıyorsa aynı iş `MultiPV` seçeneğiyle yapılır.
+
 ## Ekrandan tanıma
 
 Tuval (canvas) ile çizilen tahtalarda ya da görsel bulmacalarda DOM'da okunacak bir
@@ -120,6 +151,8 @@ Tipik olarak ~1 sn'de derinlik 8–10, 600k+ düğüm/sn. Daha güçlüsü için
 ```bash
 npm test             # hepsi
 npm run test:engine  # kural motoru (perft)
+npm run test:search  # taktikler, çok hamleli arama, aday tutarlılığı
+npm run test:variety # aday seçim kuralı
 npm run test:board   # DOM adaptörleri, koordinat matematiği, sıra çıkarımı
 npm run test:vision  # ekrandan tanıma
 npm run test:loop    # otomatik oynatma döngüsü
@@ -128,6 +161,11 @@ npm run test:loop    # otomatik oynatma döngüsü
 Testler tarayıcısız çalışır:
 
 - `test/perft.test.js` — bilinen perft değerleriyle kural motoru, Zobrist tutarlılığı.
+- `test/search.test.js` — doğrulanmış taktikler (mat kombinezonları dahil) ve çok
+  hamleli aramanın tutarlılığı: adaylar sıralı, pay içinde, tekil ve kurallı mı;
+  aralarında belirgin fark olan adayların sırası bağımsız aramayla doğrulanıyor mu.
+- `test/variety.test.js` — uçurum kesme, kayıp sınırı, mat koruması, rastgeleliğin
+  havuz içinde kalması.
 - `test/board.test.js` — asgari bir DOM taklidiyle lichess/chess.com adaptörleri.
 - `test/vision.test.js` — `test/render-board.js` sentetik tahtalar üretir (farklı
   boyut, tema, vurgulu kareler, gürültü, taş kaymaları); kalibrasyon ve tanıma
@@ -141,12 +179,12 @@ Testler tarayıcısız çalışır:
 
 ```
 manifest.json
-src/engine/    chess.js (kurallar) · evaluate.js · search.js · worker.js
+src/engine/    chess.js (kurallar) · evaluate.js · search.js · variety.js · worker.js
 src/vision/    recognizer.js (ekrandan taş tanıma)
 src/content/   board-readers.js · overlay.js · player.js · main.js
 src/sidepanel/ panel.html · panel.css · panel.js
 src/background/service_worker.js
-test/          perft · board · vision · loop + yardımcılar
+test/          perft · search · variety · board · vision · loop + yardımcılar
 ```
 
 ### Yeni site desteği eklemek

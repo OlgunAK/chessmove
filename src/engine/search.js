@@ -55,7 +55,12 @@
       opts = opts || {};
       const maxDepth = Math.min(opts.depth || 64, MAX_PLY - 2);
       const movetime = opts.movetime || 1500;
+      // Kök payı: en iyiden bu kadar santipiyon geride kalan hamlelerin de KESİN
+      // skorla dönmesini sağlar (çok hamleli / MultiPV arama). 0 ise kapalı.
       this.reset();
+      this.rootMargin = Math.max(0, opts.multiPvMargin || 0);
+      this.rootCount = Math.max(1, opts.multiPv || 1);
+      this._candidates = [];
       this.nodes = 0;
       this.aborted = false;
       this.stopFlag = opts.stopFlag || null;
@@ -70,7 +75,9 @@
       }
       if (rootMoves.length === 1) {
         const only = rootMoves[0];
-        return this._result(pos, only, E.evaluate(pos), 1, [only], started);
+        const score = E.evaluate(pos);
+        this._candidates = [{ move: only, score }];
+        return this._result(pos, only, score, 1, [only], started);
       }
 
       let best = rootMoves[0];
@@ -109,8 +116,26 @@
         time: elapsed,
         pv: pv.map(moveToUci),
         pvSan: this._pvSan(pos, pv),
+        candidates: this._describeCandidates(pos),
         fen: pos.fen()
       };
+    }
+
+    /** Aday hamleleri arayüzün kullanabileceği biçime çevirir. */
+    _describeCandidates(pos) {
+      const list = this._candidates || [];
+      return list.map((c) => {
+        const from = mFrom(c.move), to = mTo(c.move), promo = mPromo(c.move);
+        const mateIn = Math.abs(c.score) >= MATE_THRESHOLD
+          ? Math.sign(c.score) * Math.ceil((MATE - Math.abs(c.score)) / 2)
+          : null;
+        return {
+          uci: moveToUci(c.move), san: pos.moveToSan(c.move),
+          from: C.squareName(from), to: C.squareName(to),
+          promo: promo ? 'nbrq'[promo - KNIGHT] : null,
+          score: c.score, mate: mateIn
+        };
+      });
     }
 
     _pvSan(pos, pv) {
@@ -143,9 +168,15 @@
     }
 
     _searchRoot(pos, depth, rootMoves) {
-      let alpha = -INF, beta = INF;
+      const margin = this.rootMargin;
+      // Çok hamleli aramada kökte alfa hiç yükseltilmez: her hamle tam pencerede
+      // aranır, böylece skorlar birbiriyle karşılaştırılabilir olur. (Alfa'yı
+      // yükseltmek budamayı hızlandırır ama geride kalan hamlelerin skorunu
+      // aramanın sırasına bağlı hale getirir; uçurum kuralı da bozulur.)
+      const fullWindow = margin > 0;
+      let alpha = -INF;
+      const beta = INF;
       let bestScore = -INF;
-      let bestIdx = 0;
       const scores = new Array(rootMoves.length).fill(-INF);
 
       this._orderMoves(pos, rootMoves, 0, this._ttMove(pos));
@@ -154,7 +185,7 @@
         const m = rootMoves[i];
         if (!pos.makeMoveIfLegal(m)) continue;
         let score;
-        if (i === 0) {
+        if (i === 0 || fullWindow) {
           score = -this._alphaBeta(pos, depth - 1, -beta, -alpha, 1, true);
         } else {
           score = -this._alphaBeta(pos, depth - 1, -alpha - 1, -alpha, 1, true);
@@ -163,7 +194,8 @@
         pos.undoMove();
         if (this.aborted) break;
         scores[i] = score;
-        if (score > bestScore) { bestScore = score; bestIdx = i; if (score > alpha) alpha = score; }
+        if (score > bestScore) bestScore = score;
+        if (!fullWindow && bestScore > alpha) alpha = bestScore;
       }
 
       if (!this.aborted || depth === 1) {
@@ -173,6 +205,13 @@
         for (let i = 0; i < rootMoves.length; i++) rootMoves[i] = paired[i].m;
         this._storeTT(pos, depth, bestScore, TT_EXACT, paired[0].m, 0);
         this._lastDepth = depth;
+
+        // Skoru kesin bilinen adaylar: en iyiden en çok "margin" geride olanlar.
+        const cut = bestScore - margin;
+        this._candidates = paired
+          .filter((p, idx) => idx === 0 || (margin > 0 && p.s > cut))
+          .slice(0, this.rootCount)
+          .map((p) => ({ move: p.m, score: p.s }));
       }
       return bestScore;
     }

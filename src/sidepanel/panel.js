@@ -19,7 +19,7 @@ const el = {
   engineLine: $('engineLine'), statusDot: $('statusDot'), statusText: $('statusText'),
   board: $('board'), evalFill: $('evalFill'),
   bestMove: $('bestMove'), evalText: $('evalText'), depthText: $('depthText'),
-  nodesText: $('nodesText'), pvText: $('pvText'),
+  nodesText: $('nodesText'), pvText: $('pvText'), candidates: $('candidates'),
   btnScan: $('btnScan'), btnAnalyze: $('btnAnalyze'), btnPlay: $('btnPlay'),
   autoPlay: $('autoPlay'), myColor: $('myColor'), liveAnalysis: $('liveAnalysis'), loopState: $('loopState'),
   turnSel: $('turnSel'), btnFlip: $('btnFlip'),
@@ -30,6 +30,10 @@ const el = {
   maxDepth: $('maxDepth'), maxDepthOut: $('maxDepthOut'),
   playDelay: $('playDelay'), playDelayOut: $('playDelayOut'),
   scanInterval: $('scanInterval'), scanIntervalOut: $('scanIntervalOut'),
+  variety: $('variety'),
+  varietyCount: $('varietyCount'), varietyCountOut: $('varietyCountOut'),
+  varietyGap: $('varietyGap'), varietyGapOut: $('varietyGapOut'),
+  varietyMaxLoss: $('varietyMaxLoss'), varietyMaxLossOut: $('varietyMaxLossOut'),
   method: $('method'), showArrow: $('showArrow'), useStockfish: $('useStockfish'),
   btnPickRegion: $('btnPickRegion'), btnClearRegion: $('btnClearRegion'),
   captureCanvas: $('captureCanvas')
@@ -43,6 +47,7 @@ const CONTENT_FILES = [
 ];
 
 const V = self.ChessVision;
+const Variety = self.ChessVariety;
 
 const state = {
   tabId: null,
@@ -67,7 +72,8 @@ const state = {
   settings: {
     movetime: 1200, maxDepth: 30, playDelay: 400, scanInterval: 700,
     method: 'click', showArrow: true, autoPlay: false, liveAnalysis: true,
-    myColor: 'auto', turnOverride: 'auto', useStockfish: false, useVision: false
+    myColor: 'auto', turnOverride: 'auto', useStockfish: false, useVision: false,
+    variety: false, varietyCount: 10, varietyGap: 50, varietyMaxLoss: 120
   }
 };
 
@@ -95,12 +101,17 @@ function setEngineLine(engine, error) {
 
 function analyze(fen, movetime, onInfo) {
   const id = ++state.reqId;
+  const s = state.settings;
   return new Promise((resolve, reject) => {
     waiters.set(id, { resolve, reject, onInfo });
     worker.postMessage({
       id, cmd: 'analyze', fen,
-      movetime: movetime || state.settings.movetime,
-      depth: state.settings.maxDepth >= 30 ? 64 : state.settings.maxDepth
+      movetime: movetime || s.movetime,
+      depth: s.maxDepth >= 30 ? 64 : s.maxDepth,
+      // Çeşitlilik açıkken kökte birden çok hamle tam pencerede aranır; pay,
+      // uçurum eşiğine ve kayıp sınırına yetecek kadar geniş tutulur.
+      multiPv: s.variety ? s.varietyCount : 1,
+      multiPvMargin: s.variety ? Math.max(s.varietyMaxLoss, s.varietyGap) + 40 : 0
     });
   });
 }
@@ -396,6 +407,42 @@ function formatNodes(n) {
   return String(n);
 }
 
+/** Çeşitlilik açıksa adaylar arasından seçim yapar, değilse en iyiyi döndürür. */
+function choosePlayMove(res) {
+  if (!res) return null;
+  if (!state.settings.variety || !res.candidates || res.candidates.length < 2) {
+    return { move: res.best, pool: res.candidates || [], reason: 'en iyi hamle' };
+  }
+  const pick = Variety.pickMove(res.candidates, {
+    count: state.settings.varietyCount,
+    gap: state.settings.varietyGap,
+    maxLoss: state.settings.varietyMaxLoss
+  });
+  if (!pick) return { move: res.best, pool: [], reason: 'en iyi hamle' };
+  return { move: pick.choice, pool: pick.pool, reason: pick.reason };
+}
+
+function renderCandidates(res) {
+  if (!res || !res.candidates || res.candidates.length < 2 || !state.settings.variety) {
+    el.candidates.innerHTML = '';
+    return;
+  }
+  const poolSet = new Set((res.play && res.play.pool || []).map((c) => c.uci));
+  const chosen = res.play && res.play.move ? res.play.move.uci : null;
+  el.candidates.innerHTML = '';
+  for (const c of res.candidates) {
+    const span = document.createElement('span');
+    span.className = 'cand' + (c.uci === chosen ? ' picked' : (poolSet.has(c.uci) ? '' : ' out'));
+    const value = c.mate != null ? 'M' + Math.abs(c.mate) : (c.score >= 0 ? '+' : '') + (c.score / 100).toFixed(2);
+    span.textContent = `${c.san} ${value}`;
+    el.candidates.appendChild(span);
+  }
+  const note = document.createElement('span');
+  note.className = 'cand';
+  note.textContent = `${(res.play && res.play.pool || []).length} aday · ${res.play ? res.play.reason : ''}`;
+  el.candidates.appendChild(note);
+}
+
 function renderResult(res, partial) {
   if (!res) return;
   const whitePov = (state.fen.split(' ')[1] === 'w') ? 1 : -1;
@@ -409,11 +456,15 @@ function renderResult(res, partial) {
     el.evalFill.style.height = (winProbability(cp) * 100).toFixed(1) + '%';
   }
 
-  el.bestMove.textContent = res.san || (res.best ? res.best.uci : '—');
+  const shown = (res.play && res.play.move) || res.best;
+  el.bestMove.textContent = (shown && (shown.san || res.san)) || (shown ? shown.uci : '—');
   el.depthText.textContent = 'd' + (res.depth || 0);
   el.nodesText.textContent = formatNodes(res.nodes) + ' · ' + formatNodes(res.nps) + '/sn';
   el.pvText.textContent = (res.pvSan && res.pvSan.length) ? res.pvSan.join(' ') : (res.pv || []).join(' ');
-  if (!partial) renderBoard(state.fen, res.best, state.lowSquares);
+  if (!partial) {
+    renderBoard(state.fen, (res.play && res.play.move) || res.best, state.lowSquares);
+    renderCandidates(res);
+  }
 }
 
 function applyPosition(data) {
@@ -450,6 +501,7 @@ async function doAnalyze(fenArg, movetime) {
   try {
     const res = await analyze(fen, movetime, (info) => { state.fen = fen; renderResult(info, true); });
     state.fen = fen;
+    res.play = choosePlayMove(res);
     state.lastResult = res;
     state.lastAnalyzed = fen;
     renderResult(res, false);
@@ -457,7 +509,8 @@ async function doAnalyze(fenArg, movetime) {
       setStatus('warn', res.gameOver === 'checkmate' ? 'Mat — oynanacak hamle yok' : 'Pat — oynanacak hamle yok');
       return res;
     }
-    if (state.settings.showArrow && res.best) await send('showArrow', { from: res.best.from, to: res.best.to });
+    const arrow = (res.play && res.play.move) || res.best;
+    if (state.settings.showArrow && arrow) await send('showArrow', { from: arrow.from, to: arrow.to });
     return res;
   } catch (err) {
     setStatus('err', 'Analiz hatası: ' + (err.message || err));
@@ -470,15 +523,18 @@ async function doAnalyze(fenArg, movetime) {
 
 async function doPlay(res, force) {
   const r = res || state.lastResult;
-  if (!r || !r.best) { setStatus('warn', 'Önce analiz edin'); return false; }
+  if (!r) { setStatus('warn', 'Önce analiz edin'); return false; }
+  const move = (r.play && r.play.move) || r.best;
+  if (!move) { setStatus('warn', 'Önce analiz edin'); return false; }
   if (!force && state.lastPlayedFen === state.fen) return false;
   state.lastPlayedFen = state.fen;
+  const label = move.san || r.san || move.uci;
   const out = await send('playMove', {
-    from: r.best.from, to: r.best.to, promo: r.best.promo,
-    san: r.san, method: state.settings.method
+    from: move.from, to: move.to, promo: move.promo,
+    san: label, method: state.settings.method
   });
   if (out && out.ok) {
-    setStatus('ok', `Oynandı: ${r.san || r.best.uci}`);
+    setStatus('ok', `Oynandı: ${label}`);
     await send('clearArrow');
     return true;
   }
@@ -578,7 +634,7 @@ async function tickOnce() {
   state.waitingSince = 0;
 
   const res = await doAnalyze(data.fen);
-  if (!res || !res.best) return null;
+  if (!res || !((res.play && res.play.move) || res.best)) return null;
 
   if (state.settings.playDelay) await new Promise((r) => setTimeout(r, state.settings.playDelay));
 
@@ -625,6 +681,13 @@ function applySettingsToUi() {
   el.turnSel.value = s.turnOverride;
   el.useStockfish.checked = s.useStockfish;
   el.useVision.checked = s.useVision;
+  el.variety.checked = s.variety;
+  el.varietyCount.value = s.varietyCount;
+  el.varietyGap.value = s.varietyGap;
+  el.varietyMaxLoss.value = s.varietyMaxLoss;
+  el.varietyCountOut.textContent = s.varietyCount;
+  el.varietyGapOut.textContent = (s.varietyGap / 100).toFixed(2);
+  el.varietyMaxLossOut.textContent = (s.varietyMaxLoss / 100).toFixed(2);
   el.movetimeOut.textContent = (s.movetime / 1000).toFixed(1) + ' sn';
   el.maxDepthOut.textContent = s.maxDepth >= 30 ? 'sınırsız' : s.maxDepth;
   el.playDelayOut.textContent = (s.playDelay / 1000).toFixed(1) + ' sn';
@@ -725,7 +788,10 @@ for (const [input, out, fmt, key] of [
   [el.movetime, el.movetimeOut, (v) => (v / 1000).toFixed(1) + ' sn', 'movetime'],
   [el.maxDepth, el.maxDepthOut, (v) => (v >= 30 ? 'sınırsız' : String(v)), 'maxDepth'],
   [el.playDelay, el.playDelayOut, (v) => (v / 1000).toFixed(1) + ' sn', 'playDelay'],
-  [el.scanInterval, el.scanIntervalOut, (v) => (v / 1000).toFixed(1) + ' sn', 'scanInterval']
+  [el.scanInterval, el.scanIntervalOut, (v) => (v / 1000).toFixed(1) + ' sn', 'scanInterval'],
+  [el.varietyCount, el.varietyCountOut, (v) => String(v), 'varietyCount'],
+  [el.varietyGap, el.varietyGapOut, (v) => (v / 100).toFixed(2), 'varietyGap'],
+  [el.varietyMaxLoss, el.varietyMaxLossOut, (v) => (v / 100).toFixed(2), 'varietyMaxLoss']
 ]) {
   input.addEventListener('input', () => {
     const v = parseInt(input.value, 10);
@@ -734,6 +800,13 @@ for (const [input, out, fmt, key] of [
     saveSettings();
   });
 }
+
+el.variety.addEventListener('change', () => {
+  state.settings.variety = el.variety.checked;
+  saveSettings();
+  if (!state.settings.variety) el.candidates.innerHTML = '';
+  state.lastAnalyzed = null;            // sonraki turda yeniden analiz edilsin
+});
 
 el.method.addEventListener('change', () => { state.settings.method = el.method.value; saveSettings(); });
 el.showArrow.addEventListener('change', async () => {

@@ -4,8 +4,10 @@
   "description": "Sayfadaki satranç tahtasını okuyup en iyi hamleyi hesaplayan ve oynayan Chrome eklentisi",
   "private": true,
   "scripts": {
-    "test": "node test/perft.test.js && node test/board.test.js && node test/vision.test.js && node test/loop.test.js",
+    "test": "node test/perft.test.js && node test/search.test.js && node test/variety.test.js && node test/board.test.js && node test/vision.test.js && node test/loop.test.js",
     "test:engine": "node test/perft.test.js",
+    "test:search": "node test/search.test.js",
+    "test:variety": "node test/variety.test.js",
     "test:board": "node test/board.test.js",
     "test:vision": "node test/vision.test.js",
     "test:loop": "node test/loop.test.js"

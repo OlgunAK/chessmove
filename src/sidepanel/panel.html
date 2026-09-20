@@ -39,6 +39,7 @@
       <span id="nodesText">0 n</span>
     </div>
     <div id="pvText" class="pv"></div>
+    <div id="candidates" class="candidates"></div>
   </section>
 
   <section class="actions">
@@ -122,6 +123,24 @@
       <input type="range" id="playDelay" min="0" max="5000" step="100" value="400">
       <output id="playDelayOut">0.4 sn</output>
     </div>
+    <label class="switch"><input type="checkbox" id="variety"><span>Hamle çeşitliliği</span></label>
+    <div class="row">
+      <label for="varietyCount">Aday sayısı</label>
+      <input type="range" id="varietyCount" min="2" max="10" step="1" value="10">
+      <output id="varietyCountOut">10</output>
+    </div>
+    <div class="row">
+      <label for="varietyGap">Uçurum eşiği</label>
+      <input type="range" id="varietyGap" min="10" max="200" step="5" value="50">
+      <output id="varietyGapOut">0.50</output>
+    </div>
+    <div class="row">
+      <label for="varietyMaxLoss">En fazla kayıp</label>
+      <input type="range" id="varietyMaxLoss" min="20" max="300" step="10" value="120">
+      <output id="varietyMaxLossOut">1.20</output>
+    </div>
+    <p class="hint">Adaylar arasında uçurum eşiğini aşan bir düşüş varsa seçim o düşüşten
+      öncekilerle sınırlanır; mat bulunduğunda mat varyantı dışına çıkılmaz.</p>
     <div class="row">
       <label for="scanInterval">Tarama aralığı</label>
       <input type="range" id="scanInterval" min="300" max="3000" step="100" value="700">
@@ -148,6 +167,7 @@
   </footer>
 
   <canvas id="captureCanvas" width="512" height="512" hidden></canvas>
+  <script src="../engine/variety.js"></script>
   <script src="../vision/recognizer.js"></script>
   <script src="panel.js"></script>
 </body>

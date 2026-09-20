@@ -130,7 +130,10 @@ function makeWorkerClass() {
         let pos;
         try { pos = new C.Position(req.fen); }
         catch (err) { this._post({ id: req.id, type: 'error', message: err.message }); return; }
-        const res = this.searcher.go(pos, { movetime: req.movetime || 100, depth: req.depth || 64 });
+        const res = this.searcher.go(pos, {
+          movetime: req.movetime || 100, depth: req.depth || 64,
+          multiPv: req.multiPv || 1, multiPvMargin: req.multiPvMargin || 0
+        });
         this._post(Object.assign({ id: req.id, type: 'bestmove', engine: 'builtin' }, res));
       }, 0);
     }
@@ -194,6 +197,7 @@ function bootPanel(options) {
   sandbox.window = sandbox;
   vm.createContext(sandbox);
 
+  vm.runInContext(read('src/engine/variety.js'), sandbox, { filename: 'variety.js' });
   vm.runInContext(read('src/vision/recognizer.js'), sandbox, { filename: 'recognizer.js' });
   vm.runInContext(read('src/sidepanel/panel.js'), sandbox, { filename: 'panel.js' });
 

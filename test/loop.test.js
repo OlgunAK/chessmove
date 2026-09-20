@@ -103,6 +103,47 @@ function seededRng(seed) {
     ok(/yeniden|bekleniyor|oynandı/.test(elements.loopState.textContent), 'durum bildirilir', elements.loopState.textContent);
   }
 
+  /* 7) Hamle çeşitliliği: aynı konumda hep aynı hamle oynanmaz, ama mat kaçmaz */
+  {
+    const firstMoves = async (variety, boots) => {
+      const out = [];
+      for (let i = 0; i < boots; i++) {
+        const { elements, page } = bootPanel({
+          settings: { variety, movetime: 120, maxDepth: 5, varietyGap: 60, varietyMaxLoss: 150 },
+          page: { replyDelay: 100000 },          // rakip oynamasın, ilk hamlede kalalım
+          rng: seededRng(7)
+        });
+        await wait(120);
+        elements.autoPlay.checked = true;
+        await elements.autoPlay.fire('change');
+        await wait(900);
+        out.push(page.played[0] || '-');
+      }
+      return out;
+    };
+
+    const fixed = await firstMoves(false, 4);
+    ok(new Set(fixed).size === 1 && fixed[0] !== '-', 'çeşitlilik kapalıyken hep aynı hamle', fixed.join(' '));
+
+    const varied = await firstMoves(true, 8);
+    ok(!varied.includes('-'), 'çeşitlilik açıkken de hamle oynanır', varied.join(' '));
+    ok(new Set(varied).size >= 2, 'çeşitlilik açıkken hamleler değişiyor', varied.join(' '));
+  }
+
+  /* 8) Çeşitlilik açıkken mat konumunda mat oynanır */
+  {
+    const { elements, page } = bootPanel({
+      page: { fen: 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4', replyDelay: 100000 },
+      settings: { variety: true, movetime: 200, maxDepth: 6 },
+      rng: seededRng(2)
+    });
+    await wait(120);
+    elements.autoPlay.checked = true;
+    await elements.autoPlay.fire('change');
+    await wait(1200);
+    ok(page.played[0] === 'f3f7', 'çeşitlilik açıkken mat kaçırılmaz', page.played.join(' '));
+  }
+
   console.log(fails ? `\n${fails} test başarısız` : '\nTüm döngü testleri geçti');
   process.exit(fails ? 1 : 0);
 })();
