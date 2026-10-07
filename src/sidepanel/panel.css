@@ -96,3 +96,7 @@ input[type=range]{flex:1;accent-color:var(--accent);min-width:0}
 button.icon.on{background:rgba(74,222,128,.18);border-color:var(--accent);color:var(--accent)}
 button.running{background:var(--warn);color:#2b1d00;border-color:transparent}
 button.running:hover{background:#fcd34d}
+
+.bookLine{font-size:11px;color:var(--accent2);line-height:1.5;min-height:0}
+.bookLine:empty{display:none}
+.bookLine b{color:var(--text);font-weight:600}

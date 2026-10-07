@@ -109,7 +109,8 @@ function seededRng(seed) {
       const out = [];
       for (let i = 0; i < boots; i++) {
         const { elements, page } = bootPanel({
-          settings: { variety, movetime: 120, maxDepth: 5, varietyGap: 60, varietyMaxLoss: 150 },
+          // kitap kapalı: burada sınanan şey motorun aday seçimi, açılış kitabı değil
+          settings: { variety, book: false, movetime: 120, maxDepth: 5, varietyGap: 60, varietyMaxLoss: 150 },
           page: { replyDelay: 100000 },          // rakip oynamasın, ilk hamlede kalalım
           rng: seededRng(7)
         });
@@ -134,7 +135,7 @@ function seededRng(seed) {
   {
     const { elements, page } = bootPanel({
       page: { fen: 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4', replyDelay: 100000 },
-      settings: { variety: true, movetime: 200, maxDepth: 6 },
+      settings: { variety: true, book: false, movetime: 200, maxDepth: 6 },
       rng: seededRng(2)
     });
     await wait(120);
@@ -202,6 +203,46 @@ function seededRng(seed) {
     await wait(2000);
     ok(/d4/.test(elements.depthText.textContent), 'sınıra ulaşır', elements.depthText.textContent);
     ok(/✓/.test(elements.depthText.textContent), 'tamamlandığı işaretlenir', elements.depthText.textContent);
+  }
+
+  /* 12) Açılış kitabı: repertuardan oynanıyor ve partiler birbirinin aynısı olmuyor */
+  {
+    const playOpening = async (settings, seed) => {
+      const { elements, page } = bootPanel({
+        settings: Object.assign({ movetime: 120, maxDepth: 5, showArrows: false }, settings),
+        page: { bookStyle: 'keskin', replyDelay: 40 },
+        rng: seededRng(seed)
+      });
+      await wait(120);
+      elements.autoPlay.checked = true;
+      await elements.autoPlay.fire('change');
+      // Kitap satırı yalnızca konum kitapta olduğu sürece görünür; açılış
+      // sırasında örnekliyoruz, parti sonunda zaten kitap bitmiş olur.
+      await wait(500);
+      const bookSnapshot = elements.bookLine.innerHTML;
+      await wait(2100);
+      return { page, elements, bookSnapshot };
+    };
+
+    const openings = new Set();
+    let bookLineShown = false;
+    let illegal = 0;
+    for (const seed of [3, 14, 29, 41, 58]) {
+      const run = await playOpening({ book: true, bookStyle: 'keskin' }, seed);
+      const page = run.page;
+      if (page.log.some((l) => l.startsWith('geçersiz'))) illegal++;
+      if (/📖/.test(run.bookSnapshot)) bookLineShown = true;
+      openings.add(page.played.slice(0, 2).join(' '));
+    }
+    ok(illegal === 0, 'kitap hamlelerinin tümü tahtaya kurallı geçiyor', illegal + ' parti hatalı');
+    ok([...openings].every((o) => /^(e2e4|d2d4)/.test(o)), 'ilk hamle repertuardan (e4 / d4)', [...openings].join(' | '));
+    ok(openings.size >= 2, 'partiler aynı açılışı tekrarlamıyor', [...openings].join(' | '));
+    ok(bookLineShown, 'panelde kitap hattı gösteriliyor', '');
+
+    // kitap kapalıyken motorun kendi seçimi gelir
+    const off = await playOpening({ book: false }, 3);
+    ok(off.page.played.length > 0, 'kitap kapalıyken de oynuyor', off.page.played.join(' '));
+    ok(off.bookSnapshot === '', 'kitap kapalıyken kitap satırı boş', off.bookSnapshot);
   }
 
   console.log(fails ? `\n${fails} test başarısız` : '\nTüm döngü testleri geçti');

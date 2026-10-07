@@ -19,7 +19,7 @@ const el = {
   engineLine: $('engineLine'), statusDot: $('statusDot'), statusText: $('statusText'),
   board: $('board'), evalFill: $('evalFill'),
   bestMove: $('bestMove'), evalText: $('evalText'), depthText: $('depthText'),
-  nodesText: $('nodesText'), pvText: $('pvText'), candidates: $('candidates'),
+  nodesText: $('nodesText'), pvText: $('pvText'), candidates: $('candidates'), bookLine: $('bookLine'),
   btnScan: $('btnScan'), btnAnalyze: $('btnAnalyze'), btnPlay: $('btnPlay'),
   autoPlay: $('autoPlay'), myColor: $('myColor'), liveAnalysis: $('liveAnalysis'), loopState: $('loopState'),
   turnSel: $('turnSel'), btnFlip: $('btnFlip'),
@@ -30,6 +30,7 @@ const el = {
   maxDepth: $('maxDepth'), maxDepthOut: $('maxDepthOut'),
   playDelay: $('playDelay'), playDelayOut: $('playDelayOut'),
   scanInterval: $('scanInterval'), scanIntervalOut: $('scanIntervalOut'),
+  useBook: $('useBook'), bookStyle: $('bookStyle'),
   variety: $('variety'),
   varietyCount: $('varietyCount'), varietyCountOut: $('varietyCountOut'),
   varietyGap: $('varietyGap'), varietyGapOut: $('varietyGapOut'),
@@ -49,6 +50,7 @@ const CONTENT_FILES = [
 
 const V = self.ChessVision;
 const Variety = self.ChessVariety;
+const Openings = self.ChessOpenings;
 
 const state = {
   tabId: null,
@@ -58,6 +60,7 @@ const state = {
   previewFlip: false,
   lowSquares: null,
   analysis: null,          // {id, fen, startedAt, result, done, promise}
+  bookPick: null,          // {fen, entry} — konum başına seçilen kitap hamlesi
   lastResult: null,
   lastPlayedFen: null,
   lastAnalyzed: null,
@@ -74,7 +77,8 @@ const state = {
     movetime: 1200, maxDepth: 30, playDelay: 400, scanInterval: 700,
     method: 'click', showArrows: true, arrowCount: 6, autoPlay: false, liveAnalysis: true,
     myColor: 'auto', turnOverride: 'auto', useStockfish: false, useVision: false,
-    variety: false, varietyCount: 10, varietyGap: 50, varietyMaxLoss: 120
+    variety: false, varietyCount: 10, varietyGap: 50, varietyMaxLoss: 120,
+    book: true, bookStyle: 'keskin'
   }
 };
 
@@ -86,6 +90,11 @@ const waiters = new Map();
 worker.onmessage = (e) => {
   const msg = e.data || {};
   if (msg.type === 'ready') { setEngineLine(msg.engine); return; }
+  if (msg.type === 'bookWarning') {
+    console.warn('Açılış kitabı hataları:', msg.errors);
+    setStatus('warn', `Açılış kitabında ${msg.errors.length} hatalı hat var (konsola yazıldı)`);
+    return;
+  }
   if (msg.type === 'engine') { state.engine = msg.engine; setEngineLine(msg.engine, msg.ok ? null : msg.message); return; }
   const w = waiters.get(msg.id);
   if (!w) return;
@@ -147,7 +156,9 @@ function startAnalysis(fen) {
     id, cmd: 'analyze', fen,
     depth: state.settings.maxDepth,
     multiPv: need.count,
-    multiPvMargin: need.margin
+    multiPvMargin: need.margin,
+    book: state.settings.book,
+    bookStyles: state.settings.bookStyle === 'hepsi' ? null : [state.settings.bookStyle]
   });
   updateAnalyzeButton();
   return entry;
@@ -504,9 +515,37 @@ function formatNodes(n) {
   return String(n);
 }
 
+/**
+ * Oynanacak hamleyi seçer. Sıra: açılış kitabı → hamle çeşitliliği → en iyi hamle.
+ * Kitap seçimi konum başına bir kez yapılıp saklanır, yoksa her analiz
+ * tazelenmesinde hamle değişip görüntü titrer.
+ */
+function chooseBookMove(res) {
+  if (!state.settings.book || !res || !res.book || !res.book.length) return null;
+  const fen = res.fen || state.fen;
+  if (!state.bookPick || state.bookPick.fen !== fen) {
+    const entry = Openings.pick(res.book);
+    state.bookPick = entry ? { fen, entry } : null;
+  }
+  if (!state.bookPick) return null;
+  const e = state.bookPick.entry;
+  // Açılışın ilk hamlelerinde onlarca hat aynı hamleyi paylaşır; hepsini
+  // listelemek yerine sayısını yazıyoruz. Hat derinleştikçe adlar kendiliğinden
+  // teke iner ve asıl açılış adı görünür.
+  const names = e.names.length > 3
+    ? `${e.names.length} hat`
+    : e.names.join(' / ');
+  return {
+    move: { from: e.from, to: e.to, promo: e.promo, uci: e.uci, san: e.san },
+    pool: res.book, reason: 'kitap: ' + names, book: e, names
+  };
+}
+
 /** Çeşitlilik açıksa adaylar arasından seçim yapar, değilse en iyiyi döndürür. */
 function choosePlayMove(res) {
   if (!res) return null;
+  const fromBook = chooseBookMove(res);
+  if (fromBook) return fromBook;
   if (!state.settings.variety || !res.candidates || res.candidates.length < 2) {
     return { move: res.best, pool: res.candidates || [], reason: 'en iyi hamle' };
   }
@@ -540,6 +579,14 @@ function renderCandidates(res) {
   el.candidates.appendChild(note);
 }
 
+function renderBookLine(res) {
+  const play = res && res.play;
+  if (!play || !play.book) { el.bookLine.innerHTML = ''; return; }
+  const others = (res.book || []).filter((e) => e.uci !== play.book.uci);
+  const extra = others.length ? ` · diğer: ${others.map((e) => e.san).join(', ')}` : '';
+  el.bookLine.innerHTML = `📖 <b>${play.names}</b> — ${play.book.san}${extra}`;
+}
+
 function renderResult(res, partial) {
   if (!res) return;
   const whitePov = (state.fen.split(' ')[1] === 'w') ? 1 : -1;
@@ -562,6 +609,7 @@ function renderResult(res, partial) {
   if (!partial) {
     renderBoard(state.fen, (res.play && res.play.move) || res.best, state.lowSquares);
     renderCandidates(res);
+    renderBookLine(res);
   }
 }
 
@@ -790,6 +838,8 @@ function applySettingsToUi() {
   el.turnSel.value = s.turnOverride;
   el.useStockfish.checked = s.useStockfish;
   el.useVision.checked = s.useVision;
+  el.useBook.checked = s.book;
+  el.bookStyle.value = s.bookStyle;
   el.variety.checked = s.variety;
   el.varietyCount.value = s.varietyCount;
   el.varietyGap.value = s.varietyGap;
@@ -925,6 +975,21 @@ for (const [input, out, fmt, key] of [
     if (key === 'arrowCount' || key === 'varietyCount' || key === 'maxDepth') restartAnalysis();
   });
 }
+
+el.useBook.addEventListener('change', () => {
+  state.settings.book = el.useBook.checked;
+  saveSettings();
+  state.bookPick = null;
+  if (!state.settings.book) el.bookLine.innerHTML = '';
+  restartAnalysis();
+});
+
+el.bookStyle.addEventListener('change', () => {
+  state.settings.bookStyle = el.bookStyle.value;
+  saveSettings();
+  state.bookPick = null;
+  restartAnalysis();
+});
 
 el.variety.addEventListener('change', () => {
   state.settings.variety = el.variety.checked;

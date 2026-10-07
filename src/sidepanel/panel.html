@@ -43,6 +43,7 @@
     </div>
     <div id="pvText" class="pv"></div>
     <div id="candidates" class="candidates"></div>
+    <div id="bookLine" class="bookLine"></div>
   </section>
 
   <section class="actions">
@@ -126,6 +127,20 @@
       <input type="range" id="playDelay" min="0" max="5000" step="100" value="400">
       <output id="playDelayOut">0.4 sn</output>
     </div>
+    <label class="switch"><input type="checkbox" id="useBook" checked><span>Açılış kitabı</span></label>
+    <div class="row">
+      <label for="bookStyle">Repertuar</label>
+      <select id="bookStyle">
+        <option value="keskin">Keskin · gambitler</option>
+        <option value="gambit">Yalnızca gambitler</option>
+        <option value="klasik">Klasik ana hatlar</option>
+        <option value="hepsi">Hepsi</option>
+      </select>
+    </div>
+    <p class="hint">Açılışta repertuardaki hatlardan ağırlıklı rastgele seçim yapılır;
+      kitap bitince motor devralır. Keskin repertuar gambit ve karşı gambitlere,
+      çift kanatlı keskin konumlara yönlendirir.</p>
+
     <label class="switch"><input type="checkbox" id="variety"><span>Hamle çeşitliliği</span></label>
     <div class="row">
       <label for="varietyCount">Aday sayısı</label>
@@ -175,6 +190,7 @@
 
   <canvas id="captureCanvas" width="512" height="512" hidden></canvas>
   <script src="../engine/variety.js"></script>
+  <script src="../engine/openings.js"></script>
   <script src="../vision/recognizer.js"></script>
   <script src="panel.js"></script>
 </body>

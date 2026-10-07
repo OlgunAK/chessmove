@@ -8,7 +8,7 @@
  */
 'use strict';
 
-importScripts('chess.js', 'evaluate.js', 'search.js', 'variety.js');
+importScripts('chess.js', 'evaluate.js', 'search.js', 'variety.js', 'openings.js');
 
 const C = self.ChessCore;
 const S = self.ChessSearch;
@@ -30,6 +30,40 @@ function post(msg) { self.postMessage(msg); }
 const DEFAULT_SLICE_MS = 200;
 let session = null;
 
+/* Açılış kitabı üslup başına bir kez kurulur. */
+const O = self.ChessOpenings;
+const bookCache = new Map();
+
+function getBook(styles) {
+  const key = (styles && styles.length ? styles.slice().sort() : ['*']).join(',');
+  if (!bookCache.has(key)) {
+    const built = O.buildBook(C, { styles: styles && styles.length ? styles : null });
+    if (built.errors.length) post({ type: 'bookWarning', errors: built.errors });
+    bookCache.set(key, built);
+  }
+  return bookCache.get(key);
+}
+
+/** Konumdaki kitap hamlelerini, bu konumda gerçekten kurallı olanlarla sınırlar. */
+function bookEntriesFor(pos, req) {
+  if (!req.book) return null;
+  const built = getBook(req.bookStyles);
+  const entries = O.lookup(built, pos.fen());
+  if (!entries) return null;
+  const out = [];
+  for (const e of entries) {
+    const move = pos.moveFromUci(e.uci);
+    if (!move) continue;                        // konum tahminimiz kitapla uyuşmuyorsa atla
+    out.push({
+      uci: e.uci, san: pos.moveToSan(move),
+      from: C.squareName(C.mFrom(move)), to: C.squareName(C.mTo(move)),
+      promo: e.uci[4] || null,
+      weight: e.weight, names: e.names
+    });
+  }
+  return out.length ? out : null;
+}
+
 function analyzeBuiltin(req) {
   let pos;
   try {
@@ -50,7 +84,8 @@ function analyzeBuiltin(req) {
   session = {
     id: req.id, pos, fen: req.fen,
     slice: req.slice || DEFAULT_SLICE_MS,
-    cancelled: false
+    cancelled: false,
+    book: bookEntriesFor(pos, req)
   };
 
   if (begin.immediate) { endSession(begin.immediate); return; }
@@ -71,7 +106,7 @@ function stepSession() {
   if (session !== current || current.cancelled) return;   // bu arada durdurulmuş
 
   if (step.completed && step.result) {
-    post(Object.assign({ id: current.id, type: 'info', engine: 'builtin' }, step.result));
+    post(Object.assign({ id: current.id, type: 'info', engine: 'builtin', book: current.book }, step.result));
   }
   if (step.finished) { endSession(); return; }
   setTimeout(stepSession, 0);          // mesaj kuyruğuna dön
@@ -80,10 +115,11 @@ function stepSession() {
 function endSession(forced) {
   if (!session) return;
   const id = session.id;
+  const book = session.book;
   session.cancelled = true;
   session = null;
   const result = forced || searcher.lastAnalysisResult();
-  if (result) post(Object.assign({ id, type: 'bestmove', engine: 'builtin' }, result));
+  if (result) post(Object.assign({ id, type: 'bestmove', engine: 'builtin', book }, result));
   else post({ id, type: 'error', message: 'Analiz sonuç üretemedi' });
 }
 

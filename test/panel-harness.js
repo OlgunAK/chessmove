@@ -11,6 +11,7 @@ const path = require('path');
 const { createWorkerSandbox } = require('./worker-sandbox.js');
 
 require('../src/engine/chess.js');
+const O = require('../src/engine/openings.js');
 require('../src/engine/evaluate.js');
 const C = globalThis.ChessCore;
 
@@ -49,6 +50,7 @@ function makePage(opts) {
     played: [],
     opponentMoves: 0,
     replyDelay: opts.replyDelay == null ? 30 : opts.replyDelay,
+    book: opts.bookStyle ? O.buildBook(C, { styles: [opts.bookStyle] }) : null,
     log: []
   };
 
@@ -91,7 +93,12 @@ function makePage(opts) {
     setTimeout(() => {
       const legal = page.pos.legalMoves();
       if (!legal.length) return;
-      const reply = legal[Math.floor(opts.rng() * legal.length)];
+      let reply = 0;
+      if (page.book) {                       // rakip de repertuardan oynasın
+        const entries = O.lookup(page.book, page.pos.fen());
+        if (entries) reply = page.pos.moveFromUci(O.pick(entries, opts.rng).uci);
+      }
+      if (!reply) reply = legal[Math.floor(opts.rng() * legal.length)];
       page.pos.makeMove(reply);
       page.opponentMoves++;
       page.log.push('rakip: ' + C.moveToUci(reply));
@@ -196,6 +203,7 @@ function bootPanel(options) {
   vm.createContext(sandbox);
 
   vm.runInContext(read('src/engine/variety.js'), sandbox, { filename: 'variety.js' });
+  vm.runInContext(read('src/engine/openings.js'), sandbox, { filename: 'openings.js' });
   vm.runInContext(read('src/vision/recognizer.js'), sandbox, { filename: 'recognizer.js' });
   vm.runInContext(read('src/sidepanel/panel.js'), sandbox, { filename: 'panel.js' });
 

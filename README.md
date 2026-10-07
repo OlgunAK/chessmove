@@ -27,6 +27,7 @@ tahtada otomatik oynayan bir Chrome eklentisi (Manifest V3, yan panel).
 | **⇢ tuşu** | Tahtadaki okları gösterir / gizler |
 | **Hamleyi oyna** | Hamle gerçek fare olaylarıyla tahtada oynanır |
 | **Otomatik oyna** | Durmadan çalışır: sıra size gelince analiz edip oynar, rakibi bekler, tekrar oynar |
+| **Açılış kitabı** | İlk hamleler repertuardan gelir; her parti farklı bir açılışla başlar |
 | **Sürekli analiz** | Sıra rakipteyken de analiz sürer; değerlendirme ve beklenen cevap canlı kalır |
 
 Kısayollar: `Alt+Shift+A` analiz, `Alt+Shift+P` hamleyi oyna.
@@ -91,6 +92,56 @@ konumu oku ──▶ sıra kimde?
   - *Ekrandan tanıma* (aşağıya bakın): konumu ekran görüntüsünden okur.
   - *Ayarlar → Bölge seç*: tahtanın köşelerini sürükleyip bölgeyi tanımlarsınız,
     konumu FEN kutusuna elle yazarsınız. Hamleler seçtiğiniz bölgeye oynanır.
+
+## Açılış repertuarı
+
+*Ayarlar → Açılış kitabı* açıkken ilk hamleler aramayla değil repertuardan gelir.
+Konumda birden çok hat varsa ağırlıklı rastgele seçim yapılır, yani her parti aynı
+açılışla başlamaz. Rakip repertuardan çıktığı anda kitap biter ve motor devralır.
+
+Dört repertuar seçeneği var:
+
+| Repertuar | İçerik |
+|---|---|
+| **Keskin · gambitler** (varsayılan) | Kral Gambiti, Viyana, Danimarka, Evans, Smith-Morra, Blackmar-Diemer, Trompowsky, Grand Prix, Fransız Steinitz, Caro-Kann Fantezi, Pirc Avusturya, Alekhine Dört Piyon; siyahta Sicilya Ejder/Najdorf, Fransız Winawer, Alekhine, Benkö, Budapeşte, Kral Hint Mar del Plata, Grünfeld |
+| **Yalnızca gambitler** | Sadece taş feda edilen hatlar |
+| **Klasik ana hatlar** | İtalyan, İspanyol, Vezir Gambiti, Londra, Nimzo-Hint, Fransız Klasik, Caro-Kann Klasik |
+| **Hepsi** | Tümü bir arada |
+
+Keskin repertuarın yaygın cevaplara verdiği karşılık:
+
+```
+1.e4 e5   → Kral Gambiti / Viyana / Danimarka / Evans
+1.e4 c5   → Smith-Morra / Grand Prix
+1.e4 e6   → Steinitz Atağı (3.Nc3 Nf6 4.e5)
+1.e4 c6   → Fantezi (3.f3)
+1.e4 d6   → Avusturya Atağı (4.f4)
+1.e4 Nf6  → Dört Piyon Atağı
+1.d4      → Blackmar-Diemer / Trompowsky / Benoni
+```
+
+Hatlar kaynakta okunabilir SAN dizileri olarak yazılır (`src/engine/openings.js`)
+ve kitap kurulurken baştan oynanır; yazım hatası sessizce geçemez, test takımı
+her hattın kurallı olduğunu doğrular. Kendi hattınızı eklemek için listeye bir
+satır yazmanız yeterli:
+
+```js
+{ name: 'Letonya Gambiti', color: 'b', tags: ['keskin', 'gambit'], weight: 2,
+  moves: 'e4 e5 Nf3 f5 Nxe5 Qf6 d4 d6' }
+```
+
+`color` hattın hangi tarafa hamle öğrettiğini söyler (`'w'`, `'b'` ya da iki
+tarafı da katmak için `'wb'`), `weight` seçilme ağırlığıdır, `tags` hangi
+repertuarlarda görüneceğini belirler.
+
+Konum anahtarı yalnızca taş dizilimi ve sırayı içerir; rok hakkı ile geçerken
+alma karesi tahmin edilerek üretildiği için anahtara katılmaz. Bunun bedeli,
+transpozisyonda kuralsız bir hamlenin önerilebilmesidir — motor her kitap
+hamlesini oynamadan önce konumda sınar ve kuralsızı eler (test bu durumun
+gerçekten oluşabildiğini de gösteriyor).
+
+Açılışta kitap, hamle çeşitliliğinin önüne geçer: çeşitlilik zaten kitabın
+ağırlıklarıyla sağlanır. Kitap bitince çeşitlilik ayarları devreye girer.
 
 ## Hamle çeşitliliği
 
@@ -186,6 +237,7 @@ npm test             # hepsi
 npm run test:engine  # kural motoru (perft)
 npm run test:search  # taktikler, çok hamleli arama, aday tutarlılığı
 npm run test:variety # aday seçim kuralı ve ok kuvvetleri
+npm run test:openings # açılış repertuarı
 npm run test:worker  # dilimlenmiş analiz ve durdurma
 npm run test:board   # DOM adaptörleri, koordinat matematiği, sıra çıkarımı
 npm run test:vision  # ekrandan tanıma
@@ -195,6 +247,10 @@ npm run test:loop    # otomatik oynatma döngüsü
 Testler tarayıcısız çalışır:
 
 - `test/perft.test.js` — bilinen perft değerleriyle kural motoru, Zobrist tutarlılığı.
+- `test/openings.test.js` — repertuardaki her hattın kurallı oynanabildiği, üslup
+  süzgeci, kitabın beklenen açılışlara yönlendirdiği (Kral Gambiti kabul edilince
+  Nf3/Bc4, 2.c4 sonrası Benkö/Budapeşte/Kral Hint gibi), ağırlıklı seçimin
+  dağılımı ve kitabın orta oyunda devreye girmediği doğrulanır.
 - `test/worker.test.js` — motor worker'ı Node'da gerçek `importScripts` davranışıyla
   koşturulur: dilimlenmiş analizin derinlik sınırına kadar ilerlemesi, her derinlikte
   aday yayınlaması ve **arama sürerken kuyruğa giren "dur" mesajının bir dilim içinde
@@ -219,12 +275,13 @@ Testler tarayıcısız çalışır:
 
 ```
 manifest.json
-src/engine/    chess.js (kurallar) · evaluate.js · search.js · variety.js · worker.js
+src/engine/    chess.js (kurallar) · evaluate.js · search.js · variety.js
+               openings.js (repertuar) · worker.js
 src/vision/    recognizer.js (ekrandan taş tanıma)
 src/content/   board-readers.js · overlay.js · player.js · main.js
 src/sidepanel/ panel.html · panel.css · panel.js
 src/background/service_worker.js
-test/          perft · search · variety · board · vision · loop + yardımcılar
+test/          perft · search · variety · openings · worker · board · vision · loop
 ```
 
 ### Yeni site desteği eklemek
