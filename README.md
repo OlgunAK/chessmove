@@ -23,12 +23,43 @@ tahtada otomatik oynayan bir Chrome eklentisi (Manifest V3, yan panel).
 | Adım | Ne olur |
 |---|---|
 | Panel açılır | Sayfadaki tahta otomatik aranır, bulunursa konum ve sıra gösterilir |
-| **Analiz et** | Motor düşünür; en iyi hamle, değerlendirme ve varyant listelenir, tahtaya ok çizilir |
+| **Analiz et** | Motor düşünmeye başlar ve derinlik sınırına kadar durmaz; sonuç her derinlikte tazelenir. Düğme çalışırken **Durdur**'a döner |
+| **⇢ tuşu** | Tahtadaki okları gösterir / gizler |
 | **Hamleyi oyna** | Hamle gerçek fare olaylarıyla tahtada oynanır |
 | **Otomatik oyna** | Durmadan çalışır: sıra size gelince analiz edip oynar, rakibi bekler, tekrar oynar |
 | **Sürekli analiz** | Sıra rakipteyken de analiz sürer; değerlendirme ve beklenen cevap canlı kalır |
 
 Kısayollar: `Alt+Shift+A` analiz, `Alt+Shift+P` hamleyi oyna.
+
+### Sürekli analiz ve oklar
+
+Analiz "şu kadar süre düşün" değil, "durdurulana kadar derinleş" biçiminde çalışır.
+Düşünme süresi ayarı aramayı **kesmez**; yalnızca otomatik modda hamlenin ne zaman
+oynanacağını belirler. Arama derinlik sınırına ulaşana, mat bulunana, konum
+değişene ya da **Durdur**'a basılana kadar derinleşmeyi sürdürür. Derinlik
+göstergesi `d12…` sürüyor, `d12 ✓` tamamlandı demektir.
+
+Her derinlikte en iyi 5–10 hamle birden hesaplanır ve tahtaya ok olarak çizilir.
+Ok, hamlenin kuvvetine göre üç yerde değişir:
+
+```
+en iyi   ━━━━━━━━━▶   kalın, opak, yeşil, hedefe kadar
+         ━━━━━━▶      ince, soluk, kehribar, kısa kalır
+en zayıf ━━━▶
+```
+
+Kuvvet, skor farkının yanında sıradaki yeri de hesaba katar; böylece hamleler
+neredeyse eşit olduğunda bile en iyiden en kötüye görsel bir düzen kalır. Ok
+sayısı *Ayarlar → Ok sayısı* ile 1–10 arasında ayarlanır, ⇢ tuşuyla açılıp
+kapanır.
+
+İki not:
+
+- Oklar (ya da hamle çeşitliliği) açıkken kökte birden çok hamle tam pencerede
+  aranır — aynı konumda ~5 kat düğüm. Yalnız en iyi hamleyi istiyorsanız okları
+  kapatın, arama tek hamleye odaklanıp daha derine iner.
+- Sürekli analiz bir çekirdeği sürekli meşgul eder. Derinlik sınırını düşürerek
+  (*Ayarlar → Derinlik sınırı*) ya da **Durdur**'a basarak sınırlayabilirsiniz.
 
 ### Otomatik mod nasıl çalışır
 
@@ -36,8 +67,8 @@ Açtığınız anda bir döngü başlar ve siz kapatana kadar sürer:
 
 ```
 konumu oku ──▶ sıra kimde?
-                 ├─ bizde  ──▶ analiz ──▶ (gecikme) ──▶ konum hâlâ aynı mı? ──▶ oyna ──┐
-                 └─ rakipte ─▶ analiz (canlı değerlendirme) ──▶ bekle ─────────────────┤
+                 ├─ bizde  ──▶ süre dolana kadar derinleş ──▶ (gecikme) ──▶ oyna ──┐
+                 └─ rakipte ─▶ derinleşmeyi sürdür (canlı değerlendirme) ──▶ bekle ──┤
                  ▲                                                                     │
                  └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -49,6 +80,8 @@ konumu oku ──▶ sıra kimde?
   döngü kilitlenmez.
 - Mat/pat durumunda hamle uydurmaz, durumu bildirir.
 - *Tarama aralığı* ayarı döngünün hızını belirler (varsayılan 0,7 sn).
+- Analiz, süre dolduğunda eldeki en derin sonuçla oynar; sonraki konuma geçince
+  yeniden derinleşmeye başlar.
 
 ### Desteklenen tahtalar
 
@@ -152,7 +185,8 @@ Tipik olarak ~1 sn'de derinlik 8–10, 600k+ düğüm/sn. Daha güçlüsü için
 npm test             # hepsi
 npm run test:engine  # kural motoru (perft)
 npm run test:search  # taktikler, çok hamleli arama, aday tutarlılığı
-npm run test:variety # aday seçim kuralı
+npm run test:variety # aday seçim kuralı ve ok kuvvetleri
+npm run test:worker  # dilimlenmiş analiz ve durdurma
 npm run test:board   # DOM adaptörleri, koordinat matematiği, sıra çıkarımı
 npm run test:vision  # ekrandan tanıma
 npm run test:loop    # otomatik oynatma döngüsü
@@ -161,19 +195,25 @@ npm run test:loop    # otomatik oynatma döngüsü
 Testler tarayıcısız çalışır:
 
 - `test/perft.test.js` — bilinen perft değerleriyle kural motoru, Zobrist tutarlılığı.
+- `test/worker.test.js` — motor worker'ı Node'da gerçek `importScripts` davranışıyla
+  koşturulur: dilimlenmiş analizin derinlik sınırına kadar ilerlemesi, her derinlikte
+  aday yayınlaması ve **arama sürerken kuyruğa giren "dur" mesajının bir dilim içinde
+  işlenmesi** doğrulanır.
 - `test/search.test.js` — doğrulanmış taktikler (mat kombinezonları dahil) ve çok
   hamleli aramanın tutarlılığı: adaylar sıralı, pay içinde, tekil ve kurallı mı;
   aralarında belirgin fark olan adayların sırası bağımsız aramayla doğrulanıyor mu.
 - `test/variety.test.js` — uçurum kesme, kayıp sınırı, mat koruması, rastgeleliğin
-  havuz içinde kalması.
-- `test/board.test.js` — asgari bir DOM taklidiyle lichess/chess.com adaptörleri.
+  havuz içinde kalması, ok kuvvetlerinin azalan sırada ve 0–1 aralığında olması.
+- `test/board.test.js` — asgari bir DOM taklidiyle lichess/chess.com adaptörleri,
+  kare koordinat matematiği ve ok geometrisi (kuvvet → uzunluk, kalınlık, saydamlık).
 - `test/vision.test.js` — `test/render-board.js` sentetik tahtalar üretir (farklı
   boyut, tema, vurgulu kareler, gürültü, taş kaymaları); kalibrasyon ve tanıma
   bunlar üzerinde ölçülür.
 - `test/loop.test.js` — `test/panel-harness.js` paneli sahte DOM + sahte chrome API
-  + gerçek motorla ayağa kaldırır, sahte sayfada rakip de oynar; otomatik modun
-  kesintisiz hamle oynadığı, kapatılınca durduğu, mat konumunda hamle uydurmadığı
-  ve geçmeyen hamleyi yeniden denediği doğrulanır.
+  + **gerçek motor worker'ıyla** ayağa kaldırır, sahte sayfada rakip de oynar; otomatik
+  modun kesintisiz hamle oynadığı, kapatılınca durduğu, mat konumunda hamle uydurmadığı,
+  geçmeyen hamleyi yeniden denediği, okların doğru kuvvet sırasıyla çizildiği ve
+  sürenin dolmasının derinleşmeyi kesmediği doğrulanır.
 
 ### Dosya düzeni
 

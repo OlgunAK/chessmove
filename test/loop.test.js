@@ -29,7 +29,7 @@ function seededRng(seed) {
 
     // her hamleden sonra analiz sürüyor mu: son sonuç güncel konumu göstermeli
     ok(elements.bestMove.textContent && elements.bestMove.textContent !== '—', 'panel güncel en iyi hamleyi gösterir', elements.bestMove.textContent);
-    ok(/oynandı|sıra|bekleniyor/.test(elements.loopState.textContent), 'döngü durumu bildirilir', elements.loopState.textContent);
+    ok(/oynandı|sıra|bekleniyor|düşünüyor/.test(elements.loopState.textContent), 'döngü durumu bildirilir', elements.loopState.textContent);
 
     elements.autoPlay.checked = false;
     await elements.autoPlay.fire('change');
@@ -142,6 +142,66 @@ function seededRng(seed) {
     await elements.autoPlay.fire('change');
     await wait(1200);
     ok(page.played[0] === 'f3f7', 'çeşitlilik açıkken mat kaçırılmaz', page.played.join(' '));
+  }
+
+  /* 9) Tahtaya çizilen oklar: sayı, sıra ve kuvvet düzeni */
+  {
+    const { elements, page } = bootPanel({
+      settings: { liveAnalysis: true, showArrows: true, arrowCount: 6, movetime: 300, maxDepth: 6 },
+      page: { replyDelay: 100000 },
+      rng: seededRng(13)
+    });
+    await wait(1500);
+
+    const arrows = page.arrows || [];
+    ok(arrows.length >= 2 && arrows.length <= 6, 'ok sayısı ayara uyuyor', arrows.length);
+    ok(arrows.every((a) => a.from && a.to && a.from !== a.to), 'her okun başlangıcı ve hedefi var',
+      JSON.stringify(arrows.slice(0, 2)));
+    const weights = arrows.map((a) => a.weight);
+    ok(weights.every((w, i) => i === 0 || w <= weights[i - 1] + 1e-9), 'kuvvetler en iyiden en kötüye azalıyor',
+      weights.map((w) => w.toFixed(2)).join(' '));
+    ok(weights[0] >= 0.9 && weights.every((w) => w > 0 && w <= 1), 'en iyi ok tam kuvvette, hepsi 0-1 arasında',
+      weights.map((w) => w.toFixed(2)).join(' '));
+    ok(arrows[0].rank === 0, 'ilk ok en iyi hamle olarak işaretli', arrows[0].rank);
+    ok(new Set(arrows.map((a) => a.uci)).size === arrows.length, 'oklar tekil hamleler', arrows.map((a) => a.uci).join(','));
+
+    // tuşla kapat / aç
+    await elements.btnArrows.fire('click');
+    await wait(150);
+    ok(page.arrows === null, 'ok tuşu okları kaldırır', JSON.stringify(page.arrows));
+    const before = page.arrowCalls;
+    await elements.btnArrows.fire('click');
+    await wait(150);
+    ok(page.arrows && page.arrows.length >= 2 && page.arrowCalls > before, 'ok tuşu okları geri koyar',
+      `${page.arrowCalls} çağrı`);
+  }
+
+  /* 10) Süre dolduktan sonra da analiz derinleşmeye devam eder */
+  {
+    const { elements, page } = bootPanel({
+      settings: { liveAnalysis: true, autoPlay: false, movetime: 150, maxDepth: 9, showArrows: true, arrowCount: 4 },
+      page: { replyDelay: 100000 },
+      rng: seededRng(17)
+    });
+    await wait(600);
+    const early = parseInt((elements.depthText.textContent || 'd0').replace(/[^0-9]/g, ''), 10);
+    await wait(2500);
+    const late = parseInt((elements.depthText.textContent || 'd0').replace(/[^0-9]/g, ''), 10);
+    ok(late > early, 'süre sınırı geçtikten sonra derinlik artmayı sürdürür', `d${early} → d${late}`);
+    ok(late <= 9, 'derinlik sınırı aşılmıyor', 'd' + late);
+    ok(page.played.length === 0, 'sürekli analiz kendiliğinden oynamaz', page.played.join(' '));
+  }
+
+  /* 11) Derinlik sınırına varınca analiz durur ve bunu bildirir */
+  {
+    const { elements } = bootPanel({
+      settings: { liveAnalysis: true, autoPlay: false, movetime: 100, maxDepth: 4, showArrows: false },
+      page: { replyDelay: 100000 },
+      rng: seededRng(19)
+    });
+    await wait(2000);
+    ok(/d4/.test(elements.depthText.textContent), 'sınıra ulaşır', elements.depthText.textContent);
+    ok(/✓/.test(elements.depthText.textContent), 'tamamlandığı işaretlenir', elements.depthText.textContent);
   }
 
   console.log(fails ? `\n${fails} test başarısız` : '\nTüm döngü testleri geçti');

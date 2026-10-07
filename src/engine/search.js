@@ -55,6 +55,10 @@
       opts = opts || {};
       const maxDepth = Math.min(opts.depth || 64, MAX_PLY - 2);
       const movetime = opts.movetime || 1500;
+      // Sürekli analiz: süre sınırı uygulanmaz, derinlik sınırına ulaşılana ya da
+      // dışarıdan durdurulana kadar derinleşmeye devam edilir. Her derinlikte
+      // onInfo ile güncel sonuç (aday listesi dahil) bildirilir.
+      const analysisMode = !!opts.analysisMode;
       // Kök payı: en iyiden bu kadar santipiyon geride kalan hamlelerin de KESİN
       // skorla dönmesini sağlar (çok hamleli / MultiPV arama). 0 ise kapalı.
       this.reset();
@@ -65,7 +69,7 @@
       this.aborted = false;
       this.stopFlag = opts.stopFlag || null;
       const started = Date.now();
-      this.stopAt = started + movetime;
+      this.stopAt = analysisMode ? Infinity : started + movetime;
 
       const rootMoves = pos.legalMoves();
       if (!rootMoves.length) {
@@ -94,10 +98,96 @@
           opts.onInfo(this._result(pos, best, bestScore, depth, bestPv, started));
         }
         if (Math.abs(score) >= MATE_THRESHOLD) break;          // mat bulundu
-        if (Date.now() - started > movetime * 0.55) break;     // sonraki derinliğe vakit yok
+        if (!analysisMode && Date.now() - started > movetime * 0.55) break;   // sonraki derinliğe vakit yok
       }
 
-      return this._result(pos, best, bestScore, this._lastDepth || 1, bestPv, started);
+      const final = this._result(pos, best, bestScore, this._lastDepth || 1, bestPv, started);
+      final.complete = !this.aborted;
+      return final;
+    }
+
+    /* --------------------- dilimlenmiş sürekli analiz ---------------------
+     * Arama bloklayıcı çalıştığı için, tek parça bir arama sürerken worker
+     * gelen mesajları (örneğin "dur") işleyemez. Bu yüzden sürekli analiz
+     * derinlik derinlik ve süre dilimleriyle yürütülür: her dilimden sonra
+     * denetim olay döngüsüne döner. Yarıda kalan derinlik bir sonraki dilimde
+     * baştan aranır, ama transpozisyon tablosu korunduğu için büyük kısmı
+     * tablodan gelir.
+     */
+
+    /** Sürekli analizi başlatır. @returns {{immediate:Object|null}} */
+    beginAnalysis(pos, opts) {
+      opts = opts || {};
+      this.reset();
+      this.rootMargin = Math.max(0, opts.multiPvMargin || 0);
+      this.rootCount = Math.max(1, opts.multiPv || 1);
+      this._candidates = [];
+      this.nodes = 0;
+      this.aborted = false;
+      this.stopFlag = null;
+
+      const started = Date.now();
+      const rootMoves = pos.legalMoves();
+      this.analysis = {
+        maxDepth: Math.min(opts.depth || 64, MAX_PLY - 2),
+        started, depth: 0, rootMoves,
+        best: rootMoves[0] || 0, bestScore: 0, bestPv: [], finished: false, last: null
+      };
+
+      if (!rootMoves.length) {
+        const res = this._result(pos, 0, pos.inCheck() ? -MATE : 0, 0, [], started);
+        res.gameOver = pos.inCheck() ? 'checkmate' : 'stalemate';
+        res.complete = true;
+        this.analysis.finished = true;
+        this.analysis.last = res;
+        return { immediate: res };
+      }
+      if (rootMoves.length === 1) {
+        const only = rootMoves[0];
+        const score = E.evaluate(pos);
+        this._candidates = [{ move: only, score }];
+        const res = this._result(pos, only, score, 1, [only], started);
+        res.complete = true;
+        this.analysis.finished = true;
+        this.analysis.last = res;
+        return { immediate: res };
+      }
+      return { immediate: null };
+    }
+
+    /**
+     * Bir süre dilimi kadar çalışır.
+     * @returns {{completed:boolean, finished:boolean, result:Object|null}}
+     *   completed: bu dilimde bir derinlik tamamlandı mı
+     *   finished : analiz bitti mi (derinlik sınırı ya da mat)
+     */
+    stepDepth(pos, sliceMs) {
+      const a = this.analysis;
+      if (!a || a.finished) return { completed: false, finished: true, result: null };
+
+      const nextDepth = a.depth + 1;
+      this.aborted = false;
+      // İlk derinlik her zaman tamamlanmalı, yoksa elimizde hiç hamle kalmaz.
+      this.stopAt = nextDepth === 1 ? Infinity : Date.now() + Math.max(20, sliceMs || 300);
+
+      const score = this._searchRoot(pos, nextDepth, a.rootMoves);
+      if (this.aborted) return { completed: false, finished: false, result: null };
+
+      a.depth = nextDepth;
+      a.best = a.rootMoves[0];
+      a.bestScore = score;
+      a.bestPv = this._extractPv(pos, nextDepth);
+      if (nextDepth >= a.maxDepth || Math.abs(score) >= MATE_THRESHOLD) a.finished = true;
+
+      const result = this._result(pos, a.best, a.bestScore, nextDepth, a.bestPv, a.started);
+      result.complete = a.finished;
+      a.last = result;
+      return { completed: true, finished: a.finished, result };
+    }
+
+    /** Analiz yarıda kesilirse elde bulunan son sonucu döndürür. */
+    lastAnalysisResult() {
+      return (this.analysis && this.analysis.last) || null;
     }
 
     _result(pos, move, score, depth, pv, started) {

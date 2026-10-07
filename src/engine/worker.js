@@ -14,13 +14,21 @@ const C = self.ChessCore;
 const S = self.ChessSearch;
 
 const searcher = new S.Searcher();
-let stopRequested = false;
 let uci = null;          // {worker, ready, busy}
 let engineName = 'builtin';
 
 function post(msg) { self.postMessage(msg); }
 
 /* ---------------- dahili motor ---------------- */
+/*
+ * Analiz dilimler halinde yürütülür: her dilimden sonra setTimeout ile olay
+ * döngüsüne dönülür, böylece "dur" mesajı arama sürerken de işlenebilir.
+ * Süre sınırı aramayı kesmez; derinlik sınırına ulaşılana, mat bulunana ya da
+ * dışarıdan durdurulana kadar derinleşme sürer.
+ */
+
+const DEFAULT_SLICE_MS = 200;
+let session = null;
 
 function analyzeBuiltin(req) {
   let pos;
@@ -30,16 +38,53 @@ function analyzeBuiltin(req) {
     post({ id: req.id, type: 'error', message: 'FEN okunamadı: ' + err.message });
     return;
   }
-  stopRequested = false;
-  const result = searcher.go(pos, {
-    movetime: req.movetime || 1500,
+
+  if (session) endSession();          // önceki analizi kapat, bekleyeni serbest bırak
+
+  const begin = searcher.beginAnalysis(pos, {
     depth: req.depth || 64,
     multiPv: req.multiPv || 1,
-    multiPvMargin: req.multiPvMargin || 0,
-    stopFlag: () => stopRequested,
-    onInfo: (info) => post(Object.assign({ id: req.id, type: 'info', engine: 'builtin' }, info))
+    multiPvMargin: req.multiPvMargin || 0
   });
-  post(Object.assign({ id: req.id, type: 'bestmove', engine: 'builtin' }, result));
+
+  session = {
+    id: req.id, pos, fen: req.fen,
+    slice: req.slice || DEFAULT_SLICE_MS,
+    cancelled: false
+  };
+
+  if (begin.immediate) { endSession(begin.immediate); return; }
+  stepSession();
+}
+
+function stepSession() {
+  if (!session || session.cancelled) return;
+  const current = session;
+  let step;
+  try {
+    step = searcher.stepDepth(current.pos, current.slice);
+  } catch (err) {
+    post({ id: current.id, type: 'error', message: String(err && err.message || err) });
+    session = null;
+    return;
+  }
+  if (session !== current || current.cancelled) return;   // bu arada durdurulmuş
+
+  if (step.completed && step.result) {
+    post(Object.assign({ id: current.id, type: 'info', engine: 'builtin' }, step.result));
+  }
+  if (step.finished) { endSession(); return; }
+  setTimeout(stepSession, 0);          // mesaj kuyruğuna dön
+}
+
+function endSession(forced) {
+  if (!session) return;
+  const id = session.id;
+  session.cancelled = true;
+  session = null;
+  const result = forced || searcher.lastAnalysisResult();
+  if (result) post(Object.assign({ id, type: 'bestmove', engine: 'builtin' }, result));
+  else post({ id, type: 'error', message: 'Analiz sonuç üretemedi' });
 }
 
 /* ---------------- Stockfish (UCI) köprüsü ---------------- */
@@ -149,7 +194,7 @@ self.onmessage = async (e) => {
       break;
 
     case 'stop':
-      stopRequested = true;
+      if (session) endSession();
       if (uci && uci.worker) uci.worker.postMessage('stop');
       break;
 

@@ -15,7 +15,10 @@
         <p id="engineLine" class="sub">motor yükleniyor…</p>
       </div>
     </div>
-    <button id="btnScan" class="icon" title="Tahtayı yeniden tara">⟳</button>
+    <div class="topButtons">
+      <button id="btnArrows" class="icon" title="Tahtadaki okları göster / gizle">⇢</button>
+      <button id="btnScan" class="icon" title="Tahtayı yeniden tara">⟳</button>
+    </div>
   </header>
 
   <section class="status" id="status">
@@ -116,7 +119,7 @@
     <div class="row">
       <label for="maxDepth">Derinlik sınırı</label>
       <input type="range" id="maxDepth" min="1" max="30" step="1" value="30">
-      <output id="maxDepthOut">sınırsız</output>
+      <output id="maxDepthOut">d30</output>
     </div>
     <div class="row">
       <label for="playDelay">Oynama gecikmesi</label>
@@ -153,7 +156,11 @@
         <option value="drag">Sürükle-bırak</option>
       </select>
     </div>
-    <label class="switch"><input type="checkbox" id="showArrow" checked><span>Tahtada ok göster</span></label>
+    <div class="row">
+      <label for="arrowCount">Ok sayısı</label>
+      <input type="range" id="arrowCount" min="1" max="10" step="1" value="6">
+      <output id="arrowCountOut">6</output>
+    </div>
     <label class="switch"><input type="checkbox" id="useStockfish"><span>Stockfish kullan (vendor/stockfish.js)</span></label>
     <div class="row">
       <button id="btnPickRegion" class="ghost">Bölge seç</button>

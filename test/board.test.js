@@ -150,5 +150,41 @@ for (const orientation of ['white', 'black']) {
   ok(lm.ep === 'e3' && lm.mover === 'w', 'iki kare piyon itişi geçerken alma karesi verir', JSON.stringify(lm));
 }
 
+/* ---------- ok geometrisi: kuvvet → uzunluk, kalınlık, saydamlık ---------- */
+{
+  const win = makeWindow();
+  loadContent(win, ['src/content/board-readers.js', 'src/content/overlay.js']);
+  const O = win.__chessmove.overlay;
+  const a = { x: 0, y: 0 }, b = { x: 300, y: 0 };      // 300 piksel yatay
+  const SQ = 50;
+
+  const strong = O.arrowGeometry(a, b, 1, SQ);
+  const weak = O.arrowGeometry(a, b, 0, SQ);
+  const mid = O.arrowGeometry(a, b, 0.5, SQ);
+
+  ok(Math.abs(strong.length - 300) < 0.01, 'tam kuvvetli ok hedefe ulaşır', strong.length.toFixed(1));
+  ok(Math.abs(weak.length - 300 * O.ARROW_STYLE.minLength) < 0.01, 'zayıf ok kısa kalır', weak.length.toFixed(1));
+  ok(weak.length < mid.length && mid.length < strong.length, 'uzunluk kuvvetle birlikte artar',
+    [weak.length, mid.length, strong.length].map((v) => v.toFixed(0)).join(' < '));
+  ok(weak.alpha < mid.alpha && mid.alpha < strong.alpha, 'saydamlık kuvvetle birlikte azalır',
+    [weak.alpha, mid.alpha, strong.alpha].map((v) => v.toFixed(2)).join(' < '));
+  ok(weak.width < strong.width, 'kalınlık kuvvetle birlikte artar', `${weak.width.toFixed(1)} < ${strong.width.toFixed(1)}`);
+  ok(weak.hue < strong.hue, 'renk zayıfta kehribar, güçlüde yeşil', `${weak.hue.toFixed(0)} → ${strong.hue.toFixed(0)}`);
+  ok(strong.alpha <= 1 && weak.alpha >= 0.15, 'saydamlık makul aralıkta',
+    `${weak.alpha.toFixed(2)}..${strong.alpha.toFixed(2)}`);
+
+  // ok ucu gövdenin ilerisinde, gövde başlangıç karesinin dışında
+  ok(strong.tip.x > strong.shaftEnd.x, 'ok ucu gövdenin ucunda', `${strong.tip.x} > ${strong.shaftEnd.x}`);
+  ok(strong.start.x > a.x, 'gövde başlangıç karesinin içinden başlamaz', strong.start.x.toFixed(1));
+
+  // dikey ve çapraz yönlerde de tutarlı
+  const up = O.arrowGeometry({ x: 100, y: 300 }, { x: 100, y: 0 }, 1, SQ);
+  ok(Math.abs(up.tip.y - 0) < 0.01 && Math.abs(up.tip.x - 100) < 0.01, 'yukarı yönlü ok doğru uçta',
+    `${up.tip.x.toFixed(1)},${up.tip.y.toFixed(1)}`);
+  const diag = O.arrowGeometry({ x: 0, y: 0 }, { x: 200, y: 200 }, 1, SQ);
+  ok(Math.abs(diag.tip.x - 200) < 0.01 && Math.abs(diag.tip.y - 200) < 0.01, 'çapraz ok doğru uçta',
+    `${diag.tip.x.toFixed(1)},${diag.tip.y.toFixed(1)}`);
+}
+
 console.log(fails ? `\n${fails} test başarısız` : '\nTüm tahta testleri geçti');
 process.exit(fails ? 1 : 0);

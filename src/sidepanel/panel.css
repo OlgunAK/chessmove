@@ -91,3 +91,8 @@ input[type=range]{flex:1;accent-color:var(--accent);min-width:0}
   background:var(--panel2);border:1px solid var(--line);font-variant-numeric:tabular-nums}
 .candidates .cand.picked{background:rgba(74,222,128,.18);border-color:var(--accent);color:var(--text)}
 .candidates .cand.out{opacity:.45;text-decoration:line-through}
+
+.topButtons{display:flex;gap:5px}
+button.icon.on{background:rgba(74,222,128,.18);border-color:var(--accent);color:var(--accent)}
+button.running{background:var(--warn);color:#2b1d00;border-color:transparent}
+button.running:hover{background:#fcd34d}

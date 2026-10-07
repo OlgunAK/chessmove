@@ -8,11 +8,11 @@
 const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
+const { createWorkerSandbox } = require('./worker-sandbox.js');
 
 require('../src/engine/chess.js');
 require('../src/engine/evaluate.js');
 const C = globalThis.ChessCore;
-const S = require('../src/engine/search.js');
 
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 
@@ -26,7 +26,12 @@ function makeElement(id) {
       _set: new Set(),
       add(c) { this._set.add(c); },
       remove(c) { this._set.delete(c); },
-      contains(c) { return this._set.has(c); }
+      contains(c) { return this._set.has(c); },
+      toggle(c, on) {
+        const want = on === undefined ? !this._set.has(c) : !!on;
+        if (want) this._set.add(c); else this._set.delete(c);
+        return want;
+      }
     },
     addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
     appendChild(child) { this.children.push(child); return child; },
@@ -99,7 +104,15 @@ function makePage(opts) {
       case 'ping': return { ok: true };
       case 'scan': return page.scan();
       case 'playMove': return page.playMove(msg);
-      case 'watch': case 'showArrow': case 'clearArrow': case 'badge':
+      case 'showArrows':
+        page.arrows = msg.arrows || [];
+        page.arrowCalls = (page.arrowCalls || 0) + 1;
+        return { ok: true, count: page.arrows.length };
+      case 'clearArrows':
+        page.arrows = null;
+        page.clearCalls = (page.clearCalls || 0) + 1;
+        return { ok: true };
+      case 'watch': case 'showArrow': case 'badge':
       case 'resetTurn': case 'hideOverlays': case 'showOverlays':
       case 'clearRegion': case 'setRegionOrientation':
         return { ok: true };
@@ -111,31 +124,16 @@ function makePage(opts) {
   return page;
 }
 
-/** Gerçek arama motorunu çalıştıran sahte Worker. */
+/** Panelin konuştuğu Worker: gerçek src/engine/worker.js, Node sanal alanında. */
 function makeWorkerClass() {
-  return class FakeWorker {
+  return class BridgedWorker {
     constructor() {
       this.onmessage = null;
-      this.searcher = new S.Searcher();
-      setTimeout(() => this._post({ type: 'ready', engine: 'builtin' }), 0);
+      this.sandbox = createWorkerSandbox((data) => { if (this.onmessage) this.onmessage({ data }); });
     }
-    _post(data) { if (this.onmessage) this.onmessage({ data }); }
     postMessage(req) {
-      if (req.cmd === 'useBuiltin' || req.cmd === 'useStockfish') {
-        setTimeout(() => this._post({ type: 'engine', engine: 'builtin', ok: true }), 0);
-        return;
-      }
-      if (req.cmd !== 'analyze') return;
-      setTimeout(() => {
-        let pos;
-        try { pos = new C.Position(req.fen); }
-        catch (err) { this._post({ id: req.id, type: 'error', message: err.message }); return; }
-        const res = this.searcher.go(pos, {
-          movetime: req.movetime || 100, depth: req.depth || 64,
-          multiPv: req.multiPv || 1, multiPvMargin: req.multiPvMargin || 0
-        });
-        this._post(Object.assign({ id: req.id, type: 'bestmove', engine: 'builtin' }, res));
-      }, 0);
+      try { this.sandbox.self.onmessage({ data: req }); }
+      catch (err) { if (this.onmessage) this.onmessage({ data: { id: req && req.id, type: 'error', message: String(err.message || err) } }); }
     }
     terminate() {}
   };

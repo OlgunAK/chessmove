@@ -58,7 +58,42 @@
     return { choice: pool[index], pool, index, reason };
   }
 
-  const API = { pickMove, DEFAULTS, MATE_THRESHOLD };
+  const ARROW_DEFAULTS = {
+    count: 6,        // kaç ok çizilsin
+    scoreMix: 0.75,  // ağırlığın ne kadarı skordan, kalanı sıradan gelsin
+    minSpan: 60,     // skorlar birbirine çok yakınsa bu fark varmış gibi ölçeklenir
+    minWeight: 0.1   // en zayıf ok bile görünür kalsın
+  };
+
+  /**
+   * Aday hamleleri tahtaya çizilecek oklara çevirir; her oka 0..1 arası bir
+   * "kuvvet" verir. Ok bu kuvvete göre daha opak, daha kalın ve daha uzun çizilir.
+   *
+   * Kuvvet iki bileşenin karışımı: skor farkı (asıl ölçü) ve sıradaki yer
+   * (skorlar neredeyse eşitken bile en iyiden en kötüye görsel bir düzen kalsın).
+   */
+  function arrowWeights(candidates, opts) {
+    if (!candidates || !candidates.length) return [];
+    const o = Object.assign({}, ARROW_DEFAULTS, opts || {});
+    const list = candidates.slice().sort((a, b) => b.score - a.score).slice(0, Math.max(1, o.count));
+    const best = list[0].score;
+    const worst = list[list.length - 1].score;
+    const span = Math.max(o.minSpan, best - worst);
+
+    return list.map((c, i) => {
+      const byScore = 1 - (best - c.score) / span;
+      const byRank = list.length > 1 ? 1 - i / (list.length - 1) : 1;
+      const mixed = o.scoreMix * byScore + (1 - o.scoreMix) * byRank;
+      return {
+        uci: c.uci, san: c.san, from: c.from, to: c.to,
+        score: c.score, mate: c.mate == null ? null : c.mate,
+        rank: i,
+        weight: Math.max(o.minWeight, Math.min(1, mixed))
+      };
+    });
+  }
+
+  const API = { pickMove, arrowWeights, DEFAULTS, ARROW_DEFAULTS, MATE_THRESHOLD };
   root.ChessVariety = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof self !== 'undefined' ? self : globalThis);

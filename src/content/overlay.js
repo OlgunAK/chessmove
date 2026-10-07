@@ -9,10 +9,11 @@
   const Z = 2147483000;
   let styleEl = null;
   let arrowEl = null;
+  let hidden = false;
   let badgeEl = null;
   let badgeTimer = null;
   let repositionHooked = false;
-  let lastArrow = null;
+  let lastArrows = null;
 
   function ensureStyle() {
     if (styleEl && styleEl.isConnected) return;
@@ -84,55 +85,118 @@
     });
   }
 
-  /* ------------------------------ hamle oku --------------------------- */
-  function drawArrow(rect, orientation, from, to, color) {
+  /* ------------------------------ hamle okları ------------------------- */
+  /*
+   * Birden çok aday hamle aynı anda çizilir. Her okun "kuvveti" (0..1) görsel
+   * olarak üç yerde karşılık bulur: zayıf ok daha saydam, daha ince ve hedefe
+   * varmadan kısa kalır. En iyi hamle en üstte ve tam boyda çizilir.
+   */
+
+  const ARROW_STYLE = {
+    minLength: 0.45,    // en zayıf ok mesafenin bu kadarını kateder
+    minAlpha: 0.22,
+    maxAlpha: 0.95,
+    minWidth: 0.065,    // kare boyuna oran
+    maxWidth: 0.14,
+    weakHue: 42,        // zayıf: kehribar
+    strongHue: 142      // güçlü: yeşil
+  };
+
+  function arrowGeometry(a, b, weight, squareSize) {
+    const t = Math.max(0, Math.min(1, weight));
+    const S = ARROW_STYLE;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const full = Math.hypot(dx, dy) || 1;
+    const angle = Math.atan2(dy, dx);
+    const length = full * (S.minLength + (1 - S.minLength) * t);
+    const width = squareSize * (S.minWidth + (S.maxWidth - S.minWidth) * t);
+    const head = Math.max(10, width * 2.4);
+    const tip = { x: a.x + Math.cos(angle) * length, y: a.y + Math.sin(angle) * length };
+    const shaftEnd = {
+      x: tip.x - Math.cos(angle) * head * 0.85,
+      y: tip.y - Math.sin(angle) * head * 0.85
+    };
+    // Ok ucu başlangıç karesinin içinde kalmasın
+    const start = {
+      x: a.x + Math.cos(angle) * squareSize * 0.3,
+      y: a.y + Math.sin(angle) * squareSize * 0.3
+    };
+    return {
+      angle, length, width, head, tip, shaftEnd, start,
+      alpha: S.minAlpha + (S.maxAlpha - S.minAlpha) * t,
+      hue: S.weakHue + (S.strongHue - S.weakHue) * t
+    };
+  }
+
+  /**
+   * @param {Array<{from:string,to:string,weight:number,rank:number}>} list
+   */
+  function drawArrows(rect, orientation, list) {
     ensureStyle();
-    clearArrow();
+    clearArrows();
+    if (!list || !list.length) return;
+    lastArrows = { rect, orientation, list };
+
     const R = NS.readers;
-    const a = R.squareCenter(rect, orientation, from);
-    const b = R.squareCenter(rect, orientation, to);
-    if (!a || !b) return;
-    lastArrow = { from, to, color };
-
-    const pad = 40;
-    const minX = Math.min(a.x, b.x) - pad, minY = Math.min(a.y, b.y) - pad;
-    const w = Math.abs(a.x - b.x) + pad * 2, h = Math.abs(a.y - b.y) + pad * 2;
-    const size = rect.width / 8;
-
+    const squareSize = rect.width / 8;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'cm-arrow');
-    Object.assign(svg.style, { left: minX + 'px', top: minY + 'px', width: w + 'px', height: h + 'px' });
-    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    Object.assign(svg.style, {
+      left: rect.x + 'px', top: rect.y + 'px',
+      width: rect.width + 'px', height: rect.height + 'px'
+    });
+    svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
 
-    const stroke = color || '#22c55e';
-    const x1 = a.x - minX, y1 = a.y - minY, x2 = b.x - minX, y2 = b.y - minY;
-    const ang = Math.atan2(y2 - y1, x2 - x1);
-    const head = Math.max(12, size * 0.32);
-    const ex = x2 - Math.cos(ang) * head * 0.9;
-    const ey = y2 - Math.sin(ang) * head * 0.9;
+    let markup = '';
+    // Zayıftan güçlüye çiz ki en iyi hamle en üstte kalsın
+    const ordered = list.slice().sort((x, y) => (x.weight || 0) - (y.weight || 0));
+    for (const item of ordered) {
+      const a = R.squareCenter(rect, orientation, item.from);
+      const b = R.squareCenter(rect, orientation, item.to);
+      if (!a || !b) continue;
+      const o = { x: a.x - rect.x, y: a.y - rect.y };
+      const d = { x: b.x - rect.x, y: b.y - rect.y };
+      const g = arrowGeometry(o, d, item.weight, squareSize);
+      const color = `hsl(${g.hue.toFixed(0)} 72% 48%)`;
+      const alpha = g.alpha.toFixed(3);
 
-    svg.innerHTML =
-      `<circle cx="${x1}" cy="${y1}" r="${size * 0.42}" fill="none" stroke="${stroke}" stroke-width="${Math.max(3, size * 0.09)}" opacity=".85"/>` +
-      `<line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="${stroke}" stroke-width="${Math.max(4, size * 0.13)}" stroke-linecap="round" opacity=".9"/>` +
-      `<polygon points="${x2},${y2} ${x2 - head * Math.cos(ang - 0.42)},${y2 - head * Math.sin(ang - 0.42)} ${x2 - head * Math.cos(ang + 0.42)},${y2 - head * Math.sin(ang + 0.42)}" fill="${stroke}" opacity=".95"/>`;
+      if (item.rank === 0) {
+        markup += `<circle cx="${o.x.toFixed(1)}" cy="${o.y.toFixed(1)}" r="${(squareSize * 0.42).toFixed(1)}" `
+          + `fill="none" stroke="${color}" stroke-width="${Math.max(3, squareSize * 0.08).toFixed(1)}" opacity="${alpha}"/>`;
+      }
+      markup += `<line x1="${g.start.x.toFixed(1)}" y1="${g.start.y.toFixed(1)}" `
+        + `x2="${g.shaftEnd.x.toFixed(1)}" y2="${g.shaftEnd.y.toFixed(1)}" `
+        + `stroke="${color}" stroke-width="${g.width.toFixed(1)}" stroke-linecap="round" opacity="${alpha}"/>`;
+      markup += `<polygon points="${g.tip.x.toFixed(1)},${g.tip.y.toFixed(1)} `
+        + `${(g.tip.x - g.head * Math.cos(g.angle - 0.4)).toFixed(1)},${(g.tip.y - g.head * Math.sin(g.angle - 0.4)).toFixed(1)} `
+        + `${(g.tip.x - g.head * Math.cos(g.angle + 0.4)).toFixed(1)},${(g.tip.y - g.head * Math.sin(g.angle + 0.4)).toFixed(1)}" `
+        + `fill="${color}" opacity="${alpha}"/>`;
+    }
 
+    svg.innerHTML = markup;
     document.documentElement.appendChild(svg);
     arrowEl = svg;
+    if (hidden) svg.style.visibility = 'hidden';
     hookReposition();
   }
 
-  function clearArrow() {
+  /** Tek hamlelik kısayol (eski çağrılar ve basit kullanım için). */
+  function drawArrow(rect, orientation, from, to) {
+    drawArrows(rect, orientation, [{ from, to, weight: 1, rank: 0 }]);
+  }
+
+  function clearArrows() {
     if (arrowEl) { arrowEl.remove(); arrowEl = null; }
-    lastArrow = null;
+    lastArrows = null;
   }
 
   function hookReposition() {
     if (repositionHooked) return;
     repositionHooked = true;
     const redraw = () => {
-      if (!lastArrow) return;
+      if (!lastArrows) return;
       const board = NS.readers.scan(NS.state && NS.state.preferred);
-      if (board) drawArrow(board.rect, board.orientation, lastArrow.from, lastArrow.to, lastArrow.color);
+      if (board) drawArrows(board.rect, board.orientation, lastArrows.list);
     };
     window.addEventListener('scroll', redraw, { passive: true });
     window.addEventListener('resize', redraw, { passive: true });
@@ -178,7 +242,6 @@
   function hideRegion() { if (regionBox) { regionBox.remove(); regionBox = null; } }
 
   /** Ekran görüntüsü alınırken kendi çizimlerimiz kareye girmesin diye gizlenir. */
-  let hidden = false;
   function setHidden(value) {
     hidden = !!value;
     for (const node of [arrowEl, badgeEl, regionBox]) {
@@ -187,5 +250,5 @@
     return hidden;
   }
 
-  NS.overlay = { pickRegion, drawArrow, clearArrow, badge, showRegion, hideRegion, setHidden };
+  NS.overlay = { pickRegion, drawArrows, drawArrow, clearArrows, badge, showRegion, hideRegion, setHidden, arrowGeometry, ARROW_STYLE };
 })();

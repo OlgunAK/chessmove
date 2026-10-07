@@ -200,14 +200,22 @@
       return res;
     },
 
+    /** Aday hamleleri tahtaya ok olarak çizer (kuvvete göre solan/kısalan). */
+    showArrows: (msg) => {
+      const board = NS.readers.scan(S.preferred);
+      if (!board) return { ok: false, error: 'Tahta bulunamadı' };
+      NS.overlay.drawArrows(board.rect, board.orientation, msg.arrows || []);
+      return { ok: true, count: (msg.arrows || []).length };
+    },
+
     showArrow: (msg) => {
       const board = NS.readers.scan(S.preferred);
       if (!board) return { ok: false, error: 'Tahta bulunamadı' };
-      NS.overlay.drawArrow(board.rect, board.orientation, msg.from, msg.to, msg.color);
+      NS.overlay.drawArrow(board.rect, board.orientation, msg.from, msg.to);
       return { ok: true };
     },
 
-    clearArrow: () => { NS.overlay.clearArrow(); return { ok: true }; },
+    clearArrows: () => { NS.overlay.clearArrows(); return { ok: true }; },
 
     // ekran görüntüsü alınmadan önce/sonra kendi çizimlerimizi gizle-göster
     hideOverlays: () => { NS.overlay.setHidden(true); return { ok: true }; },

@@ -71,5 +71,43 @@ const cand = (uci, score, mate) => ({ uci, san: uci, score, mate: mate == null ?
   ok(one.choice.uci === 'a', 'tek aday varsa o seçilir', one.choice.uci);
 }
 
+/* 8) Ok kuvvetleri */
+{
+  const withSquares = (uci, score, mate) =>
+    ({ uci, san: uci, from: uci.slice(0, 2), to: uci.slice(2, 4), score, mate: mate == null ? null : mate });
+
+  // azalan kuvvet, en iyi tam kuvvette, hepsi 0-1 arasında
+  const list = [withSquares('e2e4', 40), withSquares('g1f3', 10), withSquares('b1c3', -30), withSquares('a2a3', -120)];
+  const w = Variety.arrowWeights(list, { count: 10 });
+  ok(w.length === 4, 'tüm adaylar ok olur', w.length);
+  ok(w.every((x, i) => i === 0 || x.weight <= w[i - 1].weight), 'kuvvetler azalan',
+    w.map((x) => x.weight.toFixed(2)).join(' '));
+  ok(Math.abs(w[0].weight - 1) < 1e-9, 'en iyi hamle tam kuvvette', w[0].weight);
+  ok(w.every((x) => x.weight > 0 && x.weight <= 1), 'kuvvetler 0-1 aralığında', w.map((x) => x.weight.toFixed(2)).join(' '));
+  ok(w.every((x, i) => x.rank === i), 'sıra numaraları doğru', w.map((x) => x.rank).join(''));
+  ok(w[0].from === 'e2' && w[0].to === 'e4', 'kare bilgileri taşınır', `${w[0].from}${w[0].to}`);
+
+  // sayı sınırı
+  const many = Array.from({ length: 12 }, (_, i) => withSquares('a2a3', 50 - i * 5));
+  ok(Variety.arrowWeights(many, { count: 5 }).length === 5, 'ok sayısı sınırı uygulanır', '');
+
+  // skorlar neredeyse eşitse oklar birbirine yakın kalmalı (minSpan tabanı)
+  const close = [withSquares('e2e4', 20), withSquares('d2d4', 18), withSquares('g1f3', 17)];
+  const cw = Variety.arrowWeights(close, { count: 3 });
+  ok(cw[cw.length - 1].weight > 0.5, 'eşdeğer hamlelerin okları benzer kuvvette',
+    cw.map((x) => x.weight.toFixed(2)).join(' '));
+
+  // mat varsa tek ok baskın olmalı
+  const mate = [withSquares('f3f7', 29998, 1), withSquares('e1g1', 30), withSquares('d2d4', 20)];
+  const mw = Variety.arrowWeights(mate, { count: 3 });
+  ok(mw[0].weight === 1 && mw[1].weight < 0.35, 'mat oku baskın, diğerleri sönük',
+    mw.map((x) => x.weight.toFixed(2)).join(' '));
+
+  // tek aday
+  const single = Variety.arrowWeights([withSquares('e2e4', 15)], {});
+  ok(single.length === 1 && single[0].weight === 1, 'tek aday tam kuvvet', single[0] && single[0].weight);
+  ok(Variety.arrowWeights([], {}).length === 0, 'boş listede ok yok', '');
+}
+
 console.log(fails ? `\n${fails} test başarısız` : '\nTüm çeşitlilik testleri geçti');
 process.exit(fails ? 1 : 0);

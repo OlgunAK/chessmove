@@ -34,7 +34,8 @@ const el = {
   varietyCount: $('varietyCount'), varietyCountOut: $('varietyCountOut'),
   varietyGap: $('varietyGap'), varietyGapOut: $('varietyGapOut'),
   varietyMaxLoss: $('varietyMaxLoss'), varietyMaxLossOut: $('varietyMaxLossOut'),
-  method: $('method'), showArrow: $('showArrow'), useStockfish: $('useStockfish'),
+  method: $('method'), useStockfish: $('useStockfish'),
+  btnArrows: $('btnArrows'), arrowCount: $('arrowCount'), arrowCountOut: $('arrowCountOut'),
   btnPickRegion: $('btnPickRegion'), btnClearRegion: $('btnClearRegion'),
   captureCanvas: $('captureCanvas')
 };
@@ -56,7 +57,7 @@ const state = {
   fen: START_FEN,
   previewFlip: false,
   lowSquares: null,
-  analyzing: false,
+  analysis: null,          // {id, fen, startedAt, result, done, promise}
   lastResult: null,
   lastPlayedFen: null,
   lastAnalyzed: null,
@@ -71,7 +72,7 @@ const state = {
   waitingSince: 0,
   settings: {
     movetime: 1200, maxDepth: 30, playDelay: 400, scanInterval: 700,
-    method: 'click', showArrow: true, autoPlay: false, liveAnalysis: true,
+    method: 'click', showArrows: true, arrowCount: 6, autoPlay: false, liveAnalysis: true,
     myColor: 'auto', turnOverride: 'auto', useStockfish: false, useVision: false,
     variety: false, varietyCount: 10, varietyGap: 50, varietyMaxLoss: 120
   }
@@ -99,22 +100,118 @@ function setEngineLine(engine, error) {
   el.engineLine.textContent = error ? `${name} · ${error}` : `motor: ${name}`;
 }
 
-function analyze(fen, movetime, onInfo) {
-  const id = ++state.reqId;
+/* ----------------------- sürekli analiz oturumu -----------------------
+ * Motor artık "şu kadar süre düşün" değil, "ben durdurana kadar derinleş"
+ * biçiminde çalışır. Her derinlik tamamlandığında panele güncel sonuç gelir;
+ * arayüz ve oklar buna göre tazelenir. Süre ayarı aramayı kesmez, yalnızca
+ * otomatik modda hamlenin ne zaman oynanacağını belirler.
+ */
+
+/** Oklar ve çeşitlilik birlikte kaç adayın hesaplanacağını belirler. */
+function analysisNeeds() {
   const s = state.settings;
-  return new Promise((resolve, reject) => {
-    waiters.set(id, { resolve, reject, onInfo });
-    worker.postMessage({
-      id, cmd: 'analyze', fen,
-      movetime: movetime || s.movetime,
-      depth: s.maxDepth >= 30 ? 64 : s.maxDepth,
-      // Çeşitlilik açıkken kökte birden çok hamle tam pencerede aranır; pay,
-      // uçurum eşiğine ve kayıp sınırına yetecek kadar geniş tutulur.
-      multiPv: s.variety ? s.varietyCount : 1,
-      multiPvMargin: s.variety ? Math.max(s.varietyMaxLoss, s.varietyGap) + 40 : 0
-    });
-  });
+  const forArrows = s.showArrows ? Math.max(2, s.arrowCount) : 1;
+  const forVariety = s.variety ? s.varietyCount : 1;
+  const count = Math.max(forArrows, forVariety);
+  if (count < 2) return { count: 1, margin: 0 };
+  const varietyMargin = s.variety ? Math.max(s.varietyMaxLoss, s.varietyGap) + 40 : 0;
+  return { count, margin: Math.max(300, varietyMargin) };
 }
+
+function startAnalysis(fen) {
+  stopAnalysis();
+  const id = ++state.reqId;
+  const need = analysisNeeds();
+  const entry = { id, fen, startedAt: Date.now(), result: null, done: false };
+  state.analysis = entry;
+
+  entry.promise = new Promise((resolve) => {
+    waiters.set(id, {
+      resolve,
+      reject: (err) => resolve({ type: 'error', message: String((err && err.message) || err) }),
+      onInfo: (info) => {
+        if (state.analysis !== entry) return;
+        entry.result = decorate(info);
+        onLiveResult(entry);
+      }
+    });
+  }).then((final) => {
+    if (final && final.type !== 'error') entry.result = decorate(final);
+    else if (final && final.type === 'error') setStatus('err', 'Analiz hatası: ' + final.message);
+    entry.done = true;
+    if (state.analysis === entry) onLiveResult(entry);
+    return entry.result;
+  });
+
+  worker.postMessage({
+    id, cmd: 'analyze', fen,
+    depth: state.settings.maxDepth,
+    multiPv: need.count,
+    multiPvMargin: need.margin
+  });
+  updateAnalyzeButton();
+  return entry;
+}
+
+function stopAnalysis() {
+  if (state.analysis && !state.analysis.done) worker.postMessage({ cmd: 'stop' });
+}
+
+/** Bu konum için analiz yoksa başlatır; varsa olduğu gibi bırakır. */
+function ensureAnalysis(fen) {
+  const a = state.analysis;
+  if (a && a.fen === fen) return a;
+  return startAnalysis(fen);
+}
+
+function decorate(res) {
+  if (res && res.best) res.play = choosePlayMove(res);
+  return res;
+}
+
+let lastPaint = 0;
+function onLiveResult(entry) {
+  const res = entry.result;
+  if (!res) return;
+  state.fen = entry.fen;
+  state.lastResult = res;
+  state.lastAnalyzed = entry.fen;
+
+  const now = Date.now();
+  const force = entry.done || !!res.gameOver;
+  if (!force && now - lastPaint < 150) return;        // erken derinlikler saniyede onlarca gelir
+  lastPaint = now;
+
+  renderResult(res, false);
+  updateAnalyzeButton();
+  paintArrows(res);
+  if (res.gameOver) {
+    setStatus('warn', res.gameOver === 'checkmate' ? 'Mat — oynanacak hamle yok' : 'Pat — oynanacak hamle yok');
+  }
+}
+
+function updateAnalyzeButton() {
+  const running = state.analysis && !state.analysis.done;
+  el.btnAnalyze.textContent = running ? 'Durdur' : 'Analiz et';
+  el.btnAnalyze.classList.toggle('running', !!running);
+}
+
+/** Aday hamleleri kuvvetlerine göre tahtaya çizer. */
+let arrowToken = 0;
+async function paintArrows(res) {
+  const token = ++arrowToken;
+  if (!state.settings.showArrows) return;
+  if (!res || !res.candidates || !res.candidates.length) return;
+  const arrows = Variety.arrowWeights(res.candidates, { count: state.settings.arrowCount });
+  if (!arrows.length) return;
+  // Oynanacak hamle en iyi değilse onu da belirgin kıl
+  const playing = res.play && res.play.move && res.play.move.uci;
+  for (const a of arrows) if (playing && a.uci === playing) a.rank = 0;
+  if (token !== arrowToken) return;
+  await send('showArrows', { arrows });
+}
+
+async function clearArrows() { await send('clearArrows'); }
 
 async function detectStockfish() {
   if (!state.settings.useStockfish) { worker.postMessage({ cmd: 'useBuiltin' }); return; }
@@ -458,7 +555,8 @@ function renderResult(res, partial) {
 
   const shown = (res.play && res.play.move) || res.best;
   el.bestMove.textContent = (shown && (shown.san || res.san)) || (shown ? shown.uci : '—');
-  el.depthText.textContent = 'd' + (res.depth || 0);
+  const running = state.analysis && !state.analysis.done && state.analysis.result === res;
+  el.depthText.textContent = 'd' + (res.depth || 0) + (running ? '…' : (res.complete ? ' ✓' : ''));
   el.nodesText.textContent = formatNodes(res.nodes) + ' · ' + formatNodes(res.nps) + '/sn';
   el.pvText.textContent = (res.pvSan && res.pvSan.length) ? res.pvSan.join(' ') : (res.pv || []).join(' ');
   if (!partial) {
@@ -487,38 +585,31 @@ async function doScan() {
   const data = await readPosition();
   if (!data || !data.ok) { setStatus('warn', (data && data.error) || 'Tahta bulunamadı'); return null; }
   applyPosition(data);
+  if (state.analysis && state.analysis.fen !== data.fen) { stopAnalysis(); state.analysis = null; }
   if (!state.settings.useVision) await send('watch', { enabled: true });
   return data;
 }
 
-async function doAnalyze(fenArg, movetime) {
-  if (state.analyzing) return null;
+/**
+ * Konumu analiz eder. Varsayılanda sonucu beklemeden döner (analiz arka planda
+ * derinleşmeyi sürdürür). waitMs verilirse o kadar bekleyip analizi durdurur ve
+ * eldeki en iyi sonucu döndürür.
+ */
+async function doAnalyze(fenArg, waitMs) {
   const fen = fenArg || state.fen;
   if (!fen) { setStatus('warn', 'Önce bir konum gerekli'); return null; }
-  state.analyzing = true;
-  el.btnAnalyze.disabled = true;
-  setLoopState('thinking', 'düşünüyor…');
-  try {
-    const res = await analyze(fen, movetime, (info) => { state.fen = fen; renderResult(info, true); });
-    state.fen = fen;
-    res.play = choosePlayMove(res);
-    state.lastResult = res;
-    state.lastAnalyzed = fen;
-    renderResult(res, false);
-    if (res.gameOver) {
-      setStatus('warn', res.gameOver === 'checkmate' ? 'Mat — oynanacak hamle yok' : 'Pat — oynanacak hamle yok');
-      return res;
-    }
-    const arrow = (res.play && res.play.move) || res.best;
-    if (state.settings.showArrow && arrow) await send('showArrow', { from: arrow.from, to: arrow.to });
-    return res;
-  } catch (err) {
-    setStatus('err', 'Analiz hatası: ' + (err.message || err));
-    return null;
-  } finally {
-    state.analyzing = false;
-    el.btnAnalyze.disabled = false;
+  const entry = ensureAnalysis(fen);
+  if (waitMs == null) return entry.result;
+
+  const deadline = entry.startedAt + waitMs;
+  while (Date.now() < deadline && !entry.done && state.analysis === entry) {
+    await new Promise((r) => setTimeout(r, Math.min(80, Math.max(10, deadline - Date.now()))));
   }
+  if (state.analysis === entry && !entry.done) {
+    stopAnalysis();
+    await entry.promise;
+  }
+  return entry.result;
 }
 
 async function doPlay(res, force) {
@@ -535,7 +626,7 @@ async function doPlay(res, force) {
   });
   if (out && out.ok) {
     setStatus('ok', `Oynandı: ${label}`);
-    await send('clearArrow');
+    await clearArrows();
     return true;
   }
   setStatus('err', 'Hamle oynanamadı' + (out && out.error ? ': ' + out.error : ''));
@@ -585,6 +676,13 @@ async function tick() {
   }
 }
 
+/** Döngü durumuna analiz derinliğini ekler. */
+function analysisLabel(base) {
+  const a = state.analysis;
+  if (!a || !a.result || !a.result.depth) return base;
+  return `${base} · d${a.result.depth}${a.done ? '' : '…'}`;
+}
+
 async function tickOnce() {
   const data = await readPosition();
   if (!data || !data.ok) {
@@ -593,26 +691,23 @@ async function tickOnce() {
     return Math.max(1200, state.settings.scanInterval);
   }
 
+  const s = state.settings;
   const changed = data.fen !== state.fen;
   if (changed || !state.board) applyPosition(data);
 
   const myTurn = data.turn === myColorNow();
 
+  // Konum için analiz sürekli açık tutulur; derinlik sınırına kadar derinleşir.
+  if (s.liveAnalysis || (s.autoPlay && myTurn)) ensureAnalysis(data.fen);
+  const a = state.analysis;
+
   if (!myTurn) {
-    setLoopState('active', 'rakip bekleniyor');
-    // Rakibin sırasında da analiz sürer: değerlendirme ve beklenen cevap canlı kalır.
-    if (state.settings.liveAnalysis && data.fen !== state.lastAnalyzed && !state.analyzing) {
-      await doAnalyze(data.fen, Math.min(state.settings.movetime, 800));
-      setLoopState('active', 'rakip bekleniyor');
-    }
+    setLoopState('active', analysisLabel('rakip bekleniyor'));
     return null;
   }
 
-  if (!state.settings.autoPlay) {
-    setLoopState('active', 'sıra sizde');
-    if (state.settings.liveAnalysis && data.fen !== state.lastAnalyzed && !state.analyzing) {
-      await doAnalyze(data.fen);
-    }
+  if (!s.autoPlay) {
+    setLoopState('active', analysisLabel('sıra sizde'));
     return null;
   }
 
@@ -620,7 +715,7 @@ async function tickOnce() {
     // Oynadık ama tahta güncellenmedi. Tıklama sayfaya geçmemiş olabilir:
     // bir süre bekleyip aynı konumu yeniden denemek döngünün kilitlenmesini önler.
     if (!state.waitingSince) state.waitingSince = Date.now();
-    const retryAfter = Math.max(2000, state.settings.scanInterval * 5);
+    const retryAfter = Math.max(2000, s.scanInterval * 5);
     if (Date.now() - state.waitingSince > retryAfter) {
       state.waitingSince = 0;
       state.lastPlayedFen = null;
@@ -633,10 +728,22 @@ async function tickOnce() {
   }
   state.waitingSince = 0;
 
-  const res = await doAnalyze(data.fen);
+  if (!a || a.fen !== data.fen || !a.result) {
+    setLoopState('thinking', 'düşünüyor…');
+    return 120;                                   // ilk derinlik henüz yok
+  }
+
+  // Süre dolmadıysa analizin derinleşmesine izin ver, tam zamanında geri dön.
+  const elapsed = Date.now() - a.startedAt;
+  if (elapsed < s.movetime && !a.done) {
+    setLoopState('thinking', analysisLabel('düşünüyor'));
+    return Math.min(s.scanInterval, Math.max(60, s.movetime - elapsed));
+  }
+
+  const res = await doAnalyze(data.fen, s.movetime);
   if (!res || !((res.play && res.play.move) || res.best)) return null;
 
-  if (state.settings.playDelay) await new Promise((r) => setTimeout(r, state.settings.playDelay));
+  if (s.playDelay) await new Promise((r) => setTimeout(r, s.playDelay));
 
   // Gecikme sırasında konum değiştiyse (rakip oynadı, geri alındı) hamleyi iptal et.
   const fresh = await readPosition();
@@ -647,7 +754,7 @@ async function tickOnce() {
 
   const played = await doPlay(res);
   setLoopState('active', played ? 'oynandı, sıradaki konum' : 'oynanamadı');
-  return played ? 250 : null;                        // oynadıysak hemen sıradaki tura geç
+  return played ? 250 : null;                     // oynadıysak hemen sıradaki tura geç
 }
 
 /* İçerik betiğinden gelen tahta değişimi döngüyü hemen uyandırır. */
@@ -674,7 +781,9 @@ function applySettingsToUi() {
   el.playDelay.value = s.playDelay;
   el.scanInterval.value = s.scanInterval;
   el.method.value = s.method;
-  el.showArrow.checked = s.showArrow;
+  el.arrowCount.value = s.arrowCount;
+  el.arrowCountOut.textContent = s.arrowCount;
+  el.btnArrows.classList.toggle('on', s.showArrows);
   el.autoPlay.checked = s.autoPlay;
   el.liveAnalysis.checked = s.liveAnalysis;
   el.myColor.value = s.myColor;
@@ -689,7 +798,7 @@ function applySettingsToUi() {
   el.varietyGapOut.textContent = (s.varietyGap / 100).toFixed(2);
   el.varietyMaxLossOut.textContent = (s.varietyMaxLoss / 100).toFixed(2);
   el.movetimeOut.textContent = (s.movetime / 1000).toFixed(1) + ' sn';
-  el.maxDepthOut.textContent = s.maxDepth >= 30 ? 'sınırsız' : s.maxDepth;
+  el.maxDepthOut.textContent = 'd' + s.maxDepth;
   el.playDelayOut.textContent = (s.playDelay / 1000).toFixed(1) + ' sn';
   el.scanIntervalOut.textContent = (s.scanInterval / 1000).toFixed(1) + ' sn';
 }
@@ -699,13 +808,27 @@ function saveSettings() { chrome.storage.local.set({ settings: state.settings })
 async function loadSettings() {
   const got = await chrome.storage.local.get('settings');
   if (got && got.settings) Object.assign(state.settings, got.settings);
+  // eski ayar adı: showArrow → showArrows
+  if (state.settings.showArrow !== undefined) {
+    if (got.settings && got.settings.showArrows === undefined) state.settings.showArrows = state.settings.showArrow;
+    delete state.settings.showArrow;
+  }
   applySettingsToUi();
 }
 
 /* -------------------------------- olaylar ----------------------------- */
 
 el.btnScan.addEventListener('click', () => doScan());
-el.btnAnalyze.addEventListener('click', async () => { await doScan(); await doAnalyze(); });
+el.btnAnalyze.addEventListener('click', async () => {
+  if (state.analysis && !state.analysis.done) {       // çalışıyorsa durdur
+    stopAnalysis();
+    await state.analysis.promise;
+    updateAnalyzeButton();
+    return;
+  }
+  await doScan();
+  await doAnalyze();                                   // beklemeden başlat, arkada derinleşir
+});
 el.btnPlay.addEventListener('click', () => doPlay(null, true));
 
 el.autoPlay.addEventListener('change', async () => {
@@ -786,18 +909,20 @@ el.useVision.addEventListener('change', () => {
 
 for (const [input, out, fmt, key] of [
   [el.movetime, el.movetimeOut, (v) => (v / 1000).toFixed(1) + ' sn', 'movetime'],
-  [el.maxDepth, el.maxDepthOut, (v) => (v >= 30 ? 'sınırsız' : String(v)), 'maxDepth'],
+  [el.maxDepth, el.maxDepthOut, (v) => 'd' + v, 'maxDepth'],
   [el.playDelay, el.playDelayOut, (v) => (v / 1000).toFixed(1) + ' sn', 'playDelay'],
   [el.scanInterval, el.scanIntervalOut, (v) => (v / 1000).toFixed(1) + ' sn', 'scanInterval'],
   [el.varietyCount, el.varietyCountOut, (v) => String(v), 'varietyCount'],
   [el.varietyGap, el.varietyGapOut, (v) => (v / 100).toFixed(2), 'varietyGap'],
-  [el.varietyMaxLoss, el.varietyMaxLossOut, (v) => (v / 100).toFixed(2), 'varietyMaxLoss']
+  [el.varietyMaxLoss, el.varietyMaxLossOut, (v) => (v / 100).toFixed(2), 'varietyMaxLoss'],
+  [el.arrowCount, el.arrowCountOut, (v) => String(v), 'arrowCount']
 ]) {
   input.addEventListener('input', () => {
     const v = parseInt(input.value, 10);
     state.settings[key] = v;
     out.textContent = fmt(v);
     saveSettings();
+    if (key === 'arrowCount' || key === 'varietyCount' || key === 'maxDepth') restartAnalysis();
   });
 }
 
@@ -805,14 +930,30 @@ el.variety.addEventListener('change', () => {
   state.settings.variety = el.variety.checked;
   saveSettings();
   if (!state.settings.variety) el.candidates.innerHTML = '';
-  state.lastAnalyzed = null;            // sonraki turda yeniden analiz edilsin
+  restartAnalysis();                    // aday sayısı değişti, baştan hesapla
 });
 
+/** Aday sayısını etkileyen ayarlar değişince analizi baştan başlatır. */
+function restartAnalysis() {
+  const fen = state.analysis ? state.analysis.fen : state.fen;
+  stopAnalysis();
+  state.analysis = null;
+  state.lastAnalyzed = null;
+  if (fen && (state.settings.liveAnalysis || state.settings.autoPlay)) ensureAnalysis(fen);
+}
+
 el.method.addEventListener('change', () => { state.settings.method = el.method.value; saveSettings(); });
-el.showArrow.addEventListener('change', async () => {
-  state.settings.showArrow = el.showArrow.checked;
+el.btnArrows.addEventListener('click', async () => {
+  state.settings.showArrows = !state.settings.showArrows;
+  el.btnArrows.classList.toggle('on', state.settings.showArrows);
   saveSettings();
-  if (!state.settings.showArrow) await send('clearArrow');
+  if (state.settings.showArrows) {
+    const res = state.analysis && state.analysis.result;
+    if (res) await paintArrows(res);
+    else if (state.lastResult) await paintArrows(state.lastResult);
+  } else {
+    await clearArrows();
+  }
 });
 el.useStockfish.addEventListener('change', async () => {
   state.settings.useStockfish = el.useStockfish.checked;
@@ -842,6 +983,8 @@ chrome.tabs.onActivated.addListener(async () => {
   const tab = await activeTab();
   if (tab) await setOrigin(tab.url || '');
   await detectStockfish();
-  await doScan();
+  const data = await doScan();
+  updateAnalyzeButton();
+  if (data && data.fen && state.settings.liveAnalysis) ensureAnalysis(data.fen);
   if (loopActive()) scheduleTick(0);
 })();
